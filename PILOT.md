@@ -15,19 +15,24 @@ user until the FP rate is known and accepted.*
 | Reference deployment hardened | **proven** | `python tools/verify_deployment.py` → 12/12 controls |
 | Signed bundle build + tamper-reject | **proven** | `python aegis/deploy/build_bundle.py ./bundle` |
 | Gate + query proxy on a kdb agent | **wired, shadow-proven** | `python -m aegis.live_kdb_agent --dry-run` |
-| Query rewrites vs **real q** | **harness ready, blocked** | `tools/validate_query_proxy_q.py` (needs valid `kc.lic`) |
+| Query rewrites vs **real q** | **PROVEN** | `tools/validate_query_proxy_q.py` → 6/6 against licensed kdb-x q (WSL); rewrite bounded 1000→534 rows |
 | Official AgentDojo score | **harness ready, blocked** | `tools/run_agentdojo_official.py` (needs `ANTHROPIC_API_KEY`) |
 | Live agent soak | **not started** | needs key + licence + a real task set |
 
-Two external blockers, both outside the code: a **valid kdb+ licence**
-(the local `kc.lic` is expired) and an **Anthropic API key**. Every harness
-that needs them detects their absence and skips cleanly with a ready-to-run
-message — none are code gaps.
+**kdb licence: RESOLVED (2026-06-12).** A licensed **kdb-x Community** runtime
+is installed in WSL at `~/kdbx` (q at `~/kdbx/l64/q`, `kc.lic` decoded from the
+base64 key, valid to 2035-01-01). Note: the classic Windows `q.exe` (kdb+ 4.0)
+rejects this key — a kdb-x licence needs the kdb-x runtime. Run the q-dependent
+harnesses in WSL with `QHOME=$HOME/kdbx QLIC=$HOME/kdbx Q_BIN=$HOME/kdbx/l64/q`.
+
+One external blocker remains: an **Anthropic API key** (for the official
+AgentDojo score and the live-model agent soak). Harnesses needing it skip
+cleanly — not a code gap.
 
 ## The staged path
 
 ### Stage 0 — unblock the environment (owner: you)
-- [ ] Install a valid `kc.lic` (set `QHOME`/`QLIC`). Verify: `tools/validate_query_proxy_q.py` runs instead of skipping.
+- [x] **kdb licence** — licensed kdb-x in WSL `~/kdbx`; `validate_query_proxy_q.py` runs green (6/6). For a Windows-native q, a kdb-x Windows runtime + this same key would work; the classic kdb+ 4.0 `q.exe` will not accept a kdb-x key.
 - [ ] Provide `ANTHROPIC_API_KEY` (env var, never on disk). **Rotate the key pasted in chat 2026-06-04 if not already done.**
 - [ ] Pick the pilot surface: which agent, which kdb tables, which analysts.
 
