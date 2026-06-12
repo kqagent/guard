@@ -146,10 +146,19 @@ class Engine:
         if self.mode == "monitor":
             # Don't block; record the would-be verdict for FP/FN analysis.
             decision = Decision(effect=Effect.ALLOW, findings=findings, shadow_effect=decided)
-            self._audit(action, Decision(effect=decided, findings=findings, shadow_effect=decided))
+            recorded = self._audit(action, Decision(effect=decided, findings=findings, shadow_effect=decided))
         else:
             decision = Decision(effect=decided, findings=findings)
-            self._audit(action, decision)
+            recorded = self._audit(action, decision)
+        if not recorded:
+            # Strict audit ("no record, no decision"): a decision that cannot
+            # be durably recorded must not take effect. Not downgraded in
+            # monitor mode — same doctrine as load_error fail-closed.
+            return Decision(effect=Effect.BLOCK, findings=findings + [Finding(
+                rule_id="ENGINE-AUDIT-UNAVAILABLE", effect=Effect.BLOCK, pack="engine",
+                reason="audit record could not be delivered to a required WORM sink, failing closed",
+                remediation="Restore the audit sink (or run with strict_sinks=False on dev surfaces).",
+            )])
         return decision
 
     # -- default-deny --------------------------------------------------------
@@ -208,11 +217,14 @@ class Engine:
 
         return out
 
-    def _audit(self, action: Action, decision: Decision) -> None:
-        if self.audit is not None:
-            try:
-                self.audit.record(action, decision, principal=action.principal)
-            except Exception:
-                # Audit failure should not crash the gate, but on a strict
-                # bundle it should itself block. Keep PoC lenient; flag in log.
-                pass
+    def _audit(self, action: Action, decision: Decision) -> bool:
+        """Record the decision. Returns False only when the audit log is
+        strict (strict_sinks) and the record could not be delivered — the
+        caller then fails closed. Lenient logs never fail the gate."""
+        if self.audit is None:
+            return True
+        try:
+            self.audit.record(action, decision, principal=action.principal)
+            return True
+        except Exception:
+            return not getattr(self.audit, "strict_sinks", False)

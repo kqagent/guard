@@ -31,6 +31,10 @@ CORE = [
     ("compliance", "regulatory crosswalk self-verified against runnable evidence"),
     ("mcp_test", "per-MCP-server manifests (AgentBound-style zero-privilege)"),
     ("redteam_corpus", "adversarial evasion corpus (catch-rate + coverage boundary)"),
+    ("worm_sinks_test", "WORM audit sinks: syslog/HTTP/file/S3 + strict fail-closed"),
+    ("approvals_test", "approval workflow: grant/deny/timeout, fail-closed silence"),
+    ("budget_test", "per-principal daily action/cost ceilings, fail-closed ledger"),
+    ("sdk_test", "broker SDK: gate -> approve -> execute -> charge composition"),
 ]
 OPTIONAL = [
     ("verify_kdb_bridge", "bridges this repo's tools/gate.js (needs Node)"),

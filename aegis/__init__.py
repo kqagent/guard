@@ -14,6 +14,7 @@ Public surface:
 from .model import Action, Decision, Effect, Finding
 from .engine import Engine
 from .guard import Guard
+from .sdk import AegisSession
 
-__all__ = ["Action", "Decision", "Effect", "Finding", "Engine", "Guard"]
+__all__ = ["Action", "Decision", "Effect", "Finding", "Engine", "Guard", "AegisSession"]
 __version__ = "0.0.1"

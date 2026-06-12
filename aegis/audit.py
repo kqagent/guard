@@ -47,7 +47,8 @@ class AuditLog:
     """
 
     def __init__(self, path: str | Path, mirror_path: str | Path | None = None,
-                 anchor_path: str | Path | None = None):
+                 anchor_path: str | Path | None = None,
+                 sinks: list | None = None, strict_sinks: bool = False):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.mirror_path = Path(mirror_path) if mirror_path else None
@@ -56,6 +57,12 @@ class AuditLog:
         self.anchor_path = Path(anchor_path) if anchor_path else None
         if self.anchor_path:
             self.anchor_path.parent.mkdir(parents=True, exist_ok=True)
+        # Off-host WORM sinks (see worm_sinks.py). strict_sinks=True makes a
+        # failed delivery raise — "no record, no decision" for regulated
+        # surfaces. Default is lenient: failures are counted, the gate runs.
+        self.sinks = list(sinks) if sinks else []
+        self.strict_sinks = strict_sinks
+        self.sink_errors: list[str] = []
 
     def _tail(self) -> tuple[str, int]:
         """Return (last_entry_hash, last_seq) from the local log."""
@@ -100,6 +107,13 @@ class AuditLog:
         if self.anchor_path:
             self.anchor_path.write_text(
                 _canonical({"seq": body["seq"], "head": entry_hash}), encoding="utf-8")
+        for sink in self.sinks:
+            try:
+                sink.append(line)
+            except Exception as e:
+                if self.strict_sinks:
+                    raise
+                self.sink_errors.append(f"seq={body['seq']} {type(e).__name__}: {e}")
         return entry
 
     def verify_against_anchor(self) -> tuple[bool, str]:

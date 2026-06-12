@@ -30,7 +30,8 @@
   "_available_but_disabled": {
     "rbac": "per-principal tool authorization; enable once principals are provisioned below",
     "command_allowlist": "default-deny shell; enable once the approved-binary list is curated",
-    "kdb_code_quality": "bridges THIS project's tools/gate.js (53 kdb rules, maze engine) as a pack; requires Node; fires on q-file coding actions"
+    "kdb_code_quality": "bridges THIS project's tools/gate.js (53 kdb rules, maze engine) as a pack; requires Node; fires on q-file coding actions",
+    "cost_budget": "per-principal daily action/cost ceilings; enable once limits are agreed and the execution layer charges the ledger (sdk.AegisSession)"
   },
   "secrets": {
     "effect": "block"
@@ -88,6 +89,13 @@
   "command_allowlist": {
     "effect": "require_approval",
     "binaries": ["ls", "cat", "grep", "rg", "git", "python", "q", "head", "tail", "wc"]
+  },
+  "cost_budget": {
+    "effect": "require_approval",
+    "ledger": ".aegis/budget.json",
+    "limits": {
+      "*": {"max_actions_per_day": 500, "max_cost_per_day": 25.0}
+    }
   },
   "kdb_code_quality": {
     "effect": "block"

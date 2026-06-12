@@ -18,6 +18,8 @@ Packs:
     resource_guard   runaway queries/loops that can degrade prod systems
     rbac             per-principal tool authorization (default-deny capable)
     command_allowlist default-deny shell: only approved binaries run
+    cost_budget      per-principal daily action/cost ceilings (reads the
+                     budget ledger; charging is the execution layer's job)
 """
 
 from __future__ import annotations
@@ -436,6 +438,43 @@ def detect_tool_rules(action: Action, policy: dict) -> list[Finding]:
 
 
 # ===========================================================================
+# cost_budget — per-principal daily ceilings (aggregate resource guard)
+# ===========================================================================
+
+def detect_cost_budget(action: Action, policy: dict) -> list[Finding]:
+    """Veto actions from a principal that has exhausted its daily budget.
+
+    Pure read: the ledger file is part of the detector's input; spend is
+    recorded by the execution layer (sdk.AegisSession) after the tool
+    actually runs. An unverifiable ledger fails closed — a spend that
+    cannot be checked against its budget is not authorized.
+    """
+    from .budget import LedgerError, limits_for, over_budget
+
+    cfg = policy.get("cost_budget", {})
+    eff = _effect(cfg, "require_approval")
+    principal = action.principal or "unknown"
+    if limits_for(principal, cfg) is None:
+        return []
+    try:
+        over, why = over_budget(principal, cfg)
+    except LedgerError as e:
+        return [Finding(
+            rule_id="BUDGET-LEDGER-UNAVAILABLE", effect=eff, pack="cost_budget",
+            reason=f"budget ledger cannot be verified ({e}) — failing closed",
+            remediation="Restore the ledger file named in policy.cost_budget.ledger.",
+        )]
+    if not over:
+        return []
+    return [Finding(
+        rule_id="BUDGET-EXHAUSTED", effect=eff, pack="cost_budget",
+        reason=f"principal '{principal}' is over its daily budget ({why})",
+        remediation="Raise the limit in policy.cost_budget.limits or wait for the daily reset.",
+        evidence=why,
+    )]
+
+
+# ===========================================================================
 # mcp_manifest — per-MCP-server capability manifests (AgentBound-style)
 # ===========================================================================
 
@@ -490,4 +529,5 @@ DETECTORS = {
     "kdb_code_quality": detect_kdb_lint,
     "tool_rules": detect_tool_rules,
     "mcp_manifest": detect_mcp_manifest,
+    "cost_budget": detect_cost_budget,
 }
