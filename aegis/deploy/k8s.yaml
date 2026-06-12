@@ -50,7 +50,11 @@ spec:
             - {name: HTTPS_PROXY, value: "http://aegis-egress.aegis-system.svc:8443"}
             - {name: HTTP_PROXY,  value: "http://aegis-egress.aegis-system.svc:8443"}
           volumeMounts:
-            - {name: policy, mountPath: /etc/aegis, readOnly: true}   # policy.json, .sig, pubkey
+            # Mount each signed artifact individually read-only (subPath) so the
+            # confinement gate can confirm policy.json / .sig / pubkey are each RO.
+            - {name: policy, mountPath: /etc/aegis/policy.json, subPath: policy.json, readOnly: true}
+            - {name: policy, mountPath: /etc/aegis/policy.json.sig, subPath: policy.json.sig, readOnly: true}
+            - {name: policy, mountPath: /etc/aegis/pubkey.hex, subPath: pubkey.hex, readOnly: true}
             - {name: scratch, mountPath: /scratch, readOnly: false}
       volumes:
         - name: policy

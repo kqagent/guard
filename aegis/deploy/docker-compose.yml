@@ -1,0 +1,89 @@
+# Dev-substrate deployment of the Aegis enforcement plane (laptops/dev; the
+# K8s manifest is the ops-substrate twin). Three services, matching the
+# confinement model: the PDP and egress proxy run with more privilege in their
+# own "control plane"; the agent runs locked down and reaches the network and
+# the decision point ONLY through them.
+#
+#   aegis-pdp      out-of-process policy decision point (signed policy mounted RO)
+#   aegis-egress   egress proxy (the only route off-box for the agent)
+#   governed-agent the workload — read-only rootfs, non-root, caps dropped,
+#                  no egress except via the proxy, talks to the PDP for decisions
+#
+# Build the signed bundle first:  python aegis/deploy/build_bundle.py ./bundle
+# Then:                           docker compose -f aegis/deploy/docker-compose.yml up
+#
+# Verify hardening of this very file's agent service before trusting it:
+#   python tools/verify_deployment.py  (covers the K8s twin; the flags below
+#   mirror its securityContext one-for-one)
+
+services:
+  aegis-pdp:
+    image: aegis/pdp:dev
+    build: {context: ../.., dockerfile: aegis/deploy/Dockerfile}
+    command: ["python", "-m", "aegis.pdp_service",
+              "--policy", "/etc/aegis/policy.json",
+              "--sig", "/etc/aegis/policy.json.sig",
+              "--pubkey", "/etc/aegis/pubkey.hex",
+              "--host", "0.0.0.0", "--port", "8787",
+              "--audit", "/var/aegis/audit.jsonl"]
+    networks: [control]
+    volumes:
+      - ./bundle:/etc/aegis:ro            # signed policy + detached sig + pinned pubkey
+      - aegis-audit:/var/aegis            # audit volume (point at a WORM sink in prod)
+    read_only: true
+    user: "65532:65532"
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    tmpfs: ["/tmp"]
+
+  # NOTE: aegis.egress_proxy currently exposes EgressGuard.decide() as a
+  # LIBRARY (used in-process by the agent and proven by egress_proxy_test),
+  # not yet a standalone forward-proxy daemon. The service below is the
+  # intended topology — a CONNECT/forward proxy that calls EgressGuard.decide
+  # on each request — but the serving shim is a tracked P3 item (see PILOT.md).
+  # Until it lands, the agent enforces egress in-process via EgressGuard and
+  # the 'agent' network's `internal: true` provides the hard no-direct-egress
+  # boundary. Uncomment when the daemon exists.
+  #
+  # aegis-egress:
+  #   image: aegis/pdp:dev
+  #   command: ["python", "-m", "aegis.egress_proxy", "--serve",
+  #             "--policy", "/etc/aegis/policy.json", "--port", "8443"]
+  #   networks: [control, external]
+  #   volumes: ["./bundle:/etc/aegis:ro"]
+  #   read_only: true
+  #   user: "65532:65532"
+  #   security_opt: ["no-new-privileges:true"]
+  #   cap_drop: ["ALL"]
+  #   tmpfs: ["/tmp"]
+
+  governed-agent:
+    image: governed-agent:dev
+    build: {context: ../.., dockerfile: aegis/deploy/Dockerfile}
+    depends_on: [aegis-pdp]
+    # The agent is on internal-only networks — it cannot reach 'external'
+    # directly. Decisions go to the PDP; egress is enforced in-process by
+    # EgressGuard until the egress daemon (above) lands.
+    networks: [agent, control]
+    environment:
+      AEGIS_PDP: "http://aegis-pdp:8787"
+      HTTPS_PROXY: "http://aegis-egress:8443"
+      HTTP_PROXY: "http://aegis-egress:8443"
+    volumes:
+      - ./bundle:/etc/aegis:ro            # read-only guardrails (agent can't edit)
+    read_only: true                       # === k8s readOnlyRootFilesystem: true
+    user: "65532:65532"                   # === runAsNonRoot / runAsUser 65532
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    tmpfs: ["/scratch:size=256m"]         # the only writable path
+
+networks:
+  agent:    {internal: true}              # agent cannot route to the internet
+  control:  {internal: true}              # PDP/agent/egress private segment
+  external: {}                            # only the egress proxy is attached here
+
+volumes:
+  aegis-audit: {}

@@ -1,0 +1,49 @@
+{
+  "version": 2,
+  "metadata": {
+    "authored_by": "control-function",
+    "description": "Aegis policy for a kdb+ ANALYST AGENT surface (named tools run_query/read_file, not a shell). Demonstrates a surface-specific policy authored for the deployment, vs the generic shell policy.json. Signed and mounted read-only in production.",
+    "surface": "kdb-analyst-agent"
+  },
+  "fail_mode": "closed",
+  "grants": {
+    "_comment": "DEFAULT-DENY over the agent's NAMED tools. No shell, no binaries, no writable paths — this agent only queries and reads.",
+    "tools": ["run_query", "read_file"]
+  },
+  "enabled_packs": [
+    "secrets",
+    "exfiltration",
+    "pii_egress",
+    "destructive_ops",
+    "prod_protection",
+    "resource_guard"
+  ],
+  "secrets": {"effect": "block"},
+  "egress": {
+    "effect": "block",
+    "allowlist_hosts": ["localhost", "127.0.0.1"]
+  },
+  "pii_egress": {
+    "effect": "block",
+    "sensitive_terms": [
+      "positions", "position_book", "pnl", "mnpi", "ssn", "account_no",
+      "client_id", "iban", "swift", "card_number", "salary", "compensation"
+    ]
+  },
+  "destructive": {"effect": "block"},
+  "prod": {
+    "effect": "block",
+    "patterns": ["(?i)\\bprod(uction)?\\b", ":2000\\b", "/mnt/prod", "hdb/prod"]
+  },
+  "protected_paths": ["aegis/policy.kdb.json", "aegis/engine.py", ".aegis/"],
+  "resource_guard": {
+    "effect": "require_approval",
+    "big_tables": ["trade", "trades", "quote", "quotes", "orders", "executions"]
+  },
+  "query_proxy": {
+    "allowed_tables": ["trade", "trades", "quote", "quotes", "orders", "executions", "ref"],
+    "require_date_tables": ["trade", "trades", "quote", "quotes", "orders", "executions"],
+    "max_rows": 1000000,
+    "default_date": ".z.d"
+  }
+}

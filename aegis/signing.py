@@ -76,6 +76,26 @@ def generate_keypair(algo: str = "ed25519") -> tuple[str, str]:
 
 # -- signing ---------------------------------------------------------------
 
+def have_ed25519() -> bool:
+    """Whether Ed25519 (the `cryptography` extra) is available."""
+    return _HAVE_ED
+
+
+def public_from_private(private_material: str, algo: str = "ed25519") -> str:
+    """Derive the public material (hex) for a held private key. For
+    hmac-sha256 the 'public' material is the same secret (symmetric)."""
+    if algo == "ed25519":
+        if not _HAVE_ED:
+            raise RuntimeError("ed25519 requested but `cryptography` is not installed")
+        priv = serialization.load_pem_private_key(private_material.encode("utf-8"), password=None)
+        return priv.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw
+        ).hex()
+    if algo == "hmac-sha256":
+        return private_material
+    raise ValueError(f"unknown algo '{algo}'")
+
+
 def sign(policy_bytes: bytes, private_material: str, algo: str = "ed25519") -> dict:
     sha = _sha256_hex(policy_bytes)
     if algo == "ed25519":
