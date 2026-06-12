@@ -13,10 +13,15 @@ Package layout: `aegis/` is the package, pyproject at root.
 Each battery is also runnable standalone: `python -m aegis.<name>` for
 demo, example_api_loop, proxy, pdp_test, query_proxy_test, egress_proxy_test,
 signing_test, confinement_test, audit_worm_test, monitor, formal,
-agentdojo_eval, compliance, mcp_test, redteam_corpus.
+agentdojo_eval, compliance, mcp_test, redteam_corpus, worm_sinks_test,
+approvals_test, budget_test, sdk_test, cedar_export.
 
-`verify_kdb_bridge` is optional and skips here — it bridges `tools/gate.js`
-from the old kqScrape repo, which is not in this repo.
+OPTIONAL tier: `verify_kdb_bridge` (needs `tools/gate.js` from the old
+kqScrape repo — not in this repo) and `formal_smt` (Z3 proofs over unbounded
+domains; needs the `[formal]` extra, installed in this venv).
+
+The official AgentDojo run: `python tools/run_agentdojo_official.py --dry-run`
+works keyless; the live score needs ANTHROPIC_API_KEY (see aegis/AGENTDOJO.md).
 
 ## Hard constraints
 
