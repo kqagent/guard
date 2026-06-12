@@ -28,6 +28,7 @@ dependencies = []  # core path is stdlib-only
 
 [project.optional-dependencies]
 signing = ["cryptography>=42"]   # Ed25519 policy signing (HMAC-SHA256 fallback needs no deps)
+formal = ["z3-solver>=4.13"]     # SMT proofs over unbounded domains (aegis.formal_smt)
 
 [project.scripts]
 aegis-pdp = "aegis.pdp_service:main"          # run the out-of-process PDP sidecar
