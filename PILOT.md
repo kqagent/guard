@@ -10,7 +10,7 @@ user until the FP rate is known and accepted.*
 
 | | Status | Evidence |
 |---|---|---|
-| Deterministic core + all layers | **proven** | `python -m aegis.run_all_checks` → 20/20 core |
+| Deterministic core + all layers | **proven** | `python -m aegis.run_all_checks` → 21/21 core |
 | Grant algebra, unbounded | **proven** | `python -m aegis.formal_smt` → 24 Z3 theorems |
 | Reference deployment hardened | **proven** | `python tools/verify_deployment.py` → 12/12 controls |
 | Signed bundle build + tamper-reject | **proven** | `python aegis/deploy/build_bundle.py ./bundle` |
@@ -57,7 +57,7 @@ values; this is the control function's artifact, not engineering's.
 - [ ] Apply the hardened manifest; **gate the deploy in CI**: `python tools/verify_deployment.py <your-manifest>` must pass 12/12.
 - [ ] Point the audit at a real **WORM sink** (syslog collector / S3 Object-Lock / HTTP append API — adapters in `aegis/worm_sinks.py`); for regulated surfaces set `strict_sinks=True`.
 - [ ] Wire the **approval backend** (`aegis-approve` CLI or an ITSM adapter) for `require_approval` decisions.
-- [ ] Build the **egress-proxy serving daemon** (currently `EgressGuard` is a library; the forward-proxy shim is the one remaining P3 code item — until then the agent enforces egress in-process and the network is `internal: true`).
+- [x] **Egress-proxy serving daemon** — built (`aegis.egress_proxy.ForwardProxy`, `aegis-egress --serve`, proven by `egress_proxy_daemon_test`). Point the agent's `HTTPS_PROXY`/`HTTP_PROXY` at it; it's the only bridge off the agent's internal network.
 
 ### Stage 5 — flip to enforce (owner: control function sign-off)
 - [ ] Only after Stage 2's FP gate is met and Stages 3–4 are green.

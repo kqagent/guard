@@ -36,34 +36,29 @@ services:
     cap_drop: ["ALL"]
     tmpfs: ["/tmp"]
 
-  # NOTE: aegis.egress_proxy currently exposes EgressGuard.decide() as a
-  # LIBRARY (used in-process by the agent and proven by egress_proxy_test),
-  # not yet a standalone forward-proxy daemon. The service below is the
-  # intended topology — a CONNECT/forward proxy that calls EgressGuard.decide
-  # on each request — but the serving shim is a tracked P3 item (see PILOT.md).
-  # Until it lands, the agent enforces egress in-process via EgressGuard and
-  # the 'agent' network's `internal: true` provides the hard no-direct-egress
-  # boundary. Uncomment when the daemon exists.
-  #
-  # aegis-egress:
-  #   image: aegis/pdp:dev
-  #   command: ["python", "-m", "aegis.egress_proxy", "--serve",
-  #             "--policy", "/etc/aegis/policy.json", "--port", "8443"]
-  #   networks: [control, external]
-  #   volumes: ["./bundle:/etc/aegis:ro"]
-  #   read_only: true
-  #   user: "65532:65532"
-  #   security_opt: ["no-new-privileges:true"]
-  #   cap_drop: ["ALL"]
-  #   tmpfs: ["/tmp"]
+  aegis-egress:
+    # Forward proxy enforcing EgressGuard on every request: plain HTTP gets
+    # full host-allowlist + SSRF + payload DLP; HTTPS CONNECT gets host-allowlist
+    # + tunnel. The only service bridging the agent's internal segment to the
+    # outside. Proven by aegis.egress_proxy_daemon_test.
+    image: aegis/pdp:dev
+    command: ["python", "-m", "aegis.egress_proxy", "--serve",
+              "--policy", "/etc/aegis/policy.json", "--host", "0.0.0.0", "--port", "8443"]
+    networks: [control, external]
+    volumes: ["./bundle:/etc/aegis:ro"]
+    read_only: true
+    user: "65532:65532"
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    tmpfs: ["/tmp"]
 
   governed-agent:
     image: governed-agent:dev
     build: {context: ../.., dockerfile: aegis/deploy/Dockerfile}
-    depends_on: [aegis-pdp]
+    depends_on: [aegis-pdp, aegis-egress]
     # The agent is on internal-only networks — it cannot reach 'external'
-    # directly. Decisions go to the PDP; egress is enforced in-process by
-    # EgressGuard until the egress daemon (above) lands.
+    # directly. Decisions go to the PDP; all egress is forced through the
+    # egress proxy (HTTPS_PROXY/HTTP_PROXY below).
     networks: [agent, control]
     environment:
       AEGIS_PDP: "http://aegis-pdp:8787"

@@ -22,6 +22,7 @@ CORE = [
     ("pdp_test", "out-of-process PDP sidecar + fail-closed when unreachable"),
     ("query_proxy_test", "kdb/SQL query proxy: parse, bound, reject"),
     ("egress_proxy_test", "network egress: host allowlist + SSRF + payload DLP"),
+    ("egress_proxy_daemon_test", "egress forward-proxy daemon: forward/block/DLP/CONNECT tunnel"),
     ("signing_test", "Ed25519 policy signing; tamper/wrong-key/missing -> fail-closed"),
     ("confinement_test", "deployment hardening validator"),
     ("audit_worm_test", "tamper-proof audit: mirror + anchor truncation detection"),

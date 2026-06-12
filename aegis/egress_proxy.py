@@ -33,6 +33,13 @@ from pathlib import Path
 
 from .detectors import _SECRET_PATTERNS
 
+# Hop-by-hop headers are connection-scoped and must not be forwarded by a proxy
+# (RFC 7230 §6.1). Plus Proxy-Connection, which clients send to proxies.
+_HOP_BY_HOP = {
+    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+    "te", "trailers", "transfer-encoding", "upgrade", "proxy-connection",
+}
+
 
 @dataclass
 class EgressVerdict:
@@ -148,3 +155,194 @@ class EgressGuard:
             classes.extend(hits[:3])
 
         return reasons, classes, redacted
+
+
+# ===========================================================================
+# ForwardProxy — the transport shell that puts EgressGuard on the wire.
+# ===========================================================================
+#
+# The agent's HTTP(S)_PROXY points here. Plain HTTP requests are inspected in
+# full (host allowlist + SSRF + payload DLP) and forwarded only if allowed;
+# HTTPS arrives as CONNECT, where the body is opaque under TLS, so we enforce
+# the host allowlist at tunnel-open and relay bytes only for allowed hosts.
+# Either way an agent on a deny-all-egress network can reach nothing this guard
+# did not approve. This is the daemon the docstring/compose referred to.
+
+import http.server  # noqa: E402
+import socket  # noqa: E402
+import threading  # noqa: E402
+import urllib.error  # noqa: E402
+import urllib.request  # noqa: E402
+
+
+def _make_handler(guard: "EgressGuard"):
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+        server_version = "aegis-egress/1.0"
+
+        def log_message(self, *a):  # quiet by default
+            pass
+
+        # -- shared refusal --------------------------------------------------
+        def _refuse(self, verdict: EgressVerdict) -> None:
+            body = ("BLOCKED BY EGRESS POLICY: "
+                    + ("; ".join(verdict.reasons) or "blocked")).encode("utf-8")
+            self.send_response(403)
+            self.send_header("content-type", "text/plain")
+            self.send_header("content-length", str(len(body)))
+            self.send_header("connection", "close")
+            self.end_headers()
+            self.wfile.write(body)
+
+        # -- plain HTTP (full inspection + forward) --------------------------
+        def _handle_forward(self) -> None:
+            length = int(self.headers.get("content-length", 0) or 0)
+            body = self.rfile.read(length) if length else b""
+            verdict = guard.decide(url=self.path, body=body, method=self.command)
+            if verdict.action == "block":
+                self._refuse(verdict)
+                return
+            # DLP redact mode: forward the sanitized bytes, not the original.
+            if verdict.redacted_body is not None:
+                body = verdict.redacted_body.encode("utf-8")
+
+            fwd_headers = {k: v for k, v in self.headers.items()
+                           if k.lower() not in _HOP_BY_HOP}
+            fwd_headers["content-length"] = str(len(body))
+            req = urllib.request.Request(self.path, data=body or None,
+                                         headers=fwd_headers, method=self.command)
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    payload = resp.read()
+                    self.send_response(resp.status)
+                    for k, v in resp.headers.items():
+                        if k.lower() not in _HOP_BY_HOP and k.lower() != "content-length":
+                            self.send_header(k, v)
+                    self.send_header("content-length", str(len(payload)))
+                    self.send_header("connection", "close")
+                    self.end_headers()
+                    self.wfile.write(payload)
+            except urllib.error.HTTPError as e:  # forward upstream error verbatim
+                payload = e.read()
+                self.send_response(e.code)
+                self.send_header("content-length", str(len(payload)))
+                self.send_header("connection", "close")
+                self.end_headers()
+                self.wfile.write(payload)
+            except Exception as e:  # upstream unreachable — fail closed (502)
+                self._refuse(EgressVerdict("block", verdict.host,
+                                           [f"upstream fetch failed ({type(e).__name__})"]))
+
+        do_GET = _handle_forward
+        do_POST = _handle_forward
+        do_PUT = _handle_forward
+        do_DELETE = _handle_forward
+        do_PATCH = _handle_forward
+        do_HEAD = _handle_forward
+
+        # -- HTTPS via CONNECT (host allowlist + tunnel) ---------------------
+        def do_CONNECT(self) -> None:
+            # A CONNECT consumes the connection (tunnel or refusal); never let
+            # the HTTP/1.1 handler try to read another request on this socket.
+            self.close_connection = True
+            host = self.path.split(":")[0]
+            try:
+                port = int(self.path.split(":")[1])
+            except (IndexError, ValueError):
+                port = 443
+            verdict = guard.decide(host=host, body=b"")  # body opaque under TLS
+            if verdict.action == "block":
+                self._refuse(verdict)
+                return
+            try:
+                upstream = socket.create_connection((host, port), timeout=15)
+            except OSError as e:
+                self._refuse(EgressVerdict("block", host,
+                                           [f"CONNECT to {host}:{port} failed ({type(e).__name__})"]))
+                return
+            self.send_response(200, "Connection established")
+            self.end_headers()
+            self._tunnel(self.connection, upstream)
+
+        @staticmethod
+        def _tunnel(a: socket.socket, b: socket.socket) -> None:
+            def pump(src, dst):
+                try:
+                    while True:
+                        chunk = src.recv(65536)
+                        if not chunk:
+                            break
+                        dst.sendall(chunk)
+                except OSError:
+                    pass
+                finally:
+                    for s in (src, dst):
+                        try:
+                            s.shutdown(socket.SHUT_RDWR)
+                        except OSError:
+                            pass
+            t = threading.Thread(target=pump, args=(a, b), daemon=True)
+            t.start()
+            pump(b, a)
+            t.join(timeout=1)
+
+    return _Handler
+
+
+class ForwardProxy:
+    """Threaded forward proxy enforcing an EgressGuard on every request.
+
+    proxy = ForwardProxy(EgressGuard.from_policy(), port=8443)
+    proxy.start()      # background thread; proxy.port is the bound port
+    ...
+    proxy.stop()
+    """
+
+    def __init__(self, guard: "EgressGuard", host: str = "127.0.0.1", port: int = 8443):
+        self.guard = guard
+        self._httpd = http.server.ThreadingHTTPServer((host, port), _make_handler(guard))
+        self._thread: threading.Thread | None = None
+
+    @property
+    def port(self) -> int:
+        return self._httpd.server_address[1]
+
+    def start(self) -> "ForwardProxy":
+        self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
+        self._thread.start()
+        return self
+
+    def serve_forever(self) -> None:
+        self._httpd.serve_forever()
+
+    def stop(self) -> None:
+        self._httpd.shutdown()
+        self._httpd.server_close()
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+    import sys
+    ap = argparse.ArgumentParser(description="Aegis egress forward proxy")
+    ap.add_argument("--serve", action="store_true", help="run the forward proxy")
+    ap.add_argument("--policy", default=None, help="policy bundle (egress_proxy block)")
+    ap.add_argument("--host", default="0.0.0.0")
+    ap.add_argument("--port", type=int, default=8443)
+    args = ap.parse_args(argv)
+    if not args.serve:
+        ap.print_help()
+        return 0
+    guard = EgressGuard.from_policy(args.policy)
+    proxy = ForwardProxy(guard, host=args.host, port=args.port)
+    print(f"aegis-egress listening on {args.host}:{args.port} "
+          f"(allowlist: {sorted(guard.allow)})")
+    try:
+        proxy.serve_forever()
+    except KeyboardInterrupt:
+        proxy.stop()
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())
