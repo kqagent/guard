@@ -1,0 +1,25 @@
+{
+  "_comment": "Normalized Aegis deployment profile for an OPERATIONAL agent (containers/K8s). This is the source of truth the confinement validator checks; the Dockerfile and k8s.yaml in this directory implement it. Run: python -m aegis.confinement_test (or feed your own profile to aegis.confinement.check_profile).",
+  "runtime": "container",
+  "read_only_root_fs": true,
+  "run_as_non_root": true,
+  "run_as_user": 65532,
+  "no_new_privileges": true,
+  "drop_capabilities": ["ALL"],
+  "add_capabilities": [],
+  "seccomp": "RuntimeDefault",
+  "host_network": false,
+  "host_pid": false,
+  "host_ipc": false,
+  "network_egress": "deny-all-except-proxy",
+  "egress_proxy": "aegis-egress.aegis-system.svc:8443",
+  "read_only_mounts": [
+    "/etc/aegis/policy.json",
+    "/etc/aegis/policy.json.sig",
+    "/etc/aegis/pubkey.hex"
+  ],
+  "writable_mounts": ["/scratch"],
+  "resource_limits": {"cpu": "1", "memory": "512Mi", "pids": 128},
+  "audit_sink": "remote",
+  "pdp_endpoint": "http://aegis-pdp.aegis-system.svc:8787"
+}

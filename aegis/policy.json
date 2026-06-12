@@ -1,0 +1,112 @@
+{
+  "version": 2,
+  "metadata": {
+    "authored_by": "control-function",
+    "description": "Aegis policy bundle. Owned by security/compliance, not engineering. In production this file is signed and mounted read-only to agents.",
+    "review_cycle": "quarterly"
+  },
+  "fail_mode": "closed",
+  "grants": {
+    "_comment": "DEFAULT-DENY. Anything not listed here is blocked, even if no detector fires. The detector packs below are a veto on top of these grants.",
+    "tools": ["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
+    "binaries": ["ls", "cat", "grep", "rg", "git", "python", "q", "head", "tail", "wc", "curl", "echo", "find"],
+    "writable_paths": ["src/", "scratch/", "tmp/"]
+  },
+  "enabled_packs": [
+    "secrets",
+    "exfiltration",
+    "pii_egress",
+    "destructive_ops",
+    "prod_protection",
+    "resource_guard",
+    "mcp_manifest"
+  ],
+  "mcp": {
+    "effect": "block",
+    "manifests": {
+      "marketdata": {"allow_tools": ["query", "schema"]}
+    }
+  },
+  "_available_but_disabled": {
+    "rbac": "per-principal tool authorization; enable once principals are provisioned below",
+    "command_allowlist": "default-deny shell; enable once the approved-binary list is curated",
+    "kdb_code_quality": "bridges THIS project's tools/gate.js (53 kdb rules, maze engine) as a pack; requires Node; fires on q-file coding actions"
+  },
+  "secrets": {
+    "effect": "block"
+  },
+  "egress": {
+    "effect": "block",
+    "allowlist_hosts": [
+      "localhost",
+      "127.0.0.1",
+      "artifactory.internal",
+      "pypi.bank-internal.example",
+      "github.bank-internal.example"
+    ]
+  },
+  "pii_egress": {
+    "effect": "block",
+    "sensitive_terms": [
+      "positions", "position_book", "pnl", "mnpi", "ssn", "account_no",
+      "client_id", "iban", "swift", "card_number", "salary", "compensation"
+    ]
+  },
+  "destructive": {
+    "effect": "block"
+  },
+  "prod": {
+    "effect": "block",
+    "patterns": [
+      "(?i)\\bprod(uction)?\\b",
+      ":2000\\b",
+      "/mnt/prod",
+      "hdb/prod"
+    ]
+  },
+  "protected_paths": [
+    "aegis/policy.json",
+    "aegis/engine.py",
+    "aegis/detectors.py",
+    ".aegis/",
+    ".git/hooks/",
+    "/etc/",
+    "C:\\Windows\\"
+  ],
+  "resource_guard": {
+    "effect": "require_approval",
+    "big_tables": ["trade", "trades", "quote", "quotes", "orders", "executions"]
+  },
+  "rbac": {
+    "effect": "block",
+    "default_deny": false,
+    "principals": {
+      "reporting-bot": {"allow_tools": ["Bash", "Read"]},
+      "*": {"deny_tools": []}
+    }
+  },
+  "command_allowlist": {
+    "effect": "require_approval",
+    "binaries": ["ls", "cat", "grep", "rg", "git", "python", "q", "head", "tail", "wc"]
+  },
+  "kdb_code_quality": {
+    "effect": "block"
+  },
+  "query_proxy": {
+    "allowed_tables": ["trade", "trades", "quote", "quotes", "orders", "executions", "ref"],
+    "require_date_tables": ["trade", "trades", "quote", "quotes", "orders", "executions"],
+    "max_rows": 1000000,
+    "default_date": ".z.d"
+  },
+  "egress_proxy": {
+    "allowlist_hosts": ["localhost", "127.0.0.1", "artifactory.internal", "pypi.bank-internal.example", "github.bank-internal.example"],
+    "block_metadata_ip": true,
+    "block_private_ranges": true,
+    "dlp": {
+      "scan_secrets": true,
+      "effect": "block",
+      "sensitive_terms": ["positions", "position_book", "pnl", "mnpi", "ssn", "account_no", "client_id", "iban", "swift", "card_number", "salary", "compensation"]
+    },
+    "max_body_bytes": 1000000
+  }
+}

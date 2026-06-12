@@ -1,0 +1,44 @@
+# Standalone packaging for Aegis (extracted from the kqScrape monorepo
+# 2026-06-12; this file now lives at the repo root as intended).
+#
+# Install: pip install -e ".[signing]"
+#
+# The core decision path is stdlib-only on purpose: the gate must never
+# fail OPEN because a third-party package failed to import.
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aegis-guardrails"
+version = "0.1.0"
+description = "Deterministic, fail-closed policy gate for LLM agents — guardrails an LLM cannot ignore."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["llm", "agent", "guardrails", "security", "policy", "kdb", "claude", "anthropic"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Topic :: Security",
+    "Programming Language :: Python :: 3",
+]
+dependencies = []  # core path is stdlib-only
+
+[project.optional-dependencies]
+signing = ["cryptography>=42"]   # Ed25519 policy signing (HMAC-SHA256 fallback needs no deps)
+
+[project.scripts]
+aegis-pdp = "aegis.pdp_service:main"          # run the out-of-process PDP sidecar
+aegis-sign = "aegis.signing:main"             # keygen / sign / verify a policy bundle
+aegis-hook = "aegis.hook:main"                # Claude Code PreToolUse adapter
+aegis-checks = "aegis.run_all_checks:run"     # the acceptance suite
+aegis-monitor = "aegis.monitor:run"           # shadow-mode FP/recall metrics
+
+[tool.setuptools]
+packages = ["aegis"]
+
+[tool.ruff]
+select = ["F"]
+target-version = "py310"

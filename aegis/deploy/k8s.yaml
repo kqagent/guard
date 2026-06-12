@@ -1,0 +1,79 @@
+# Reference hardened deployment for an Aegis-governed operational agent.
+# Implements deploy/deployment-profile.json. Validate before deploy:
+#   python -m aegis.confinement (feed the parsed Pod) — or check the profile.
+#
+# Three objects: the agent Deployment (locked down), a default-deny egress
+# NetworkPolicy, and a note that the PDP + egress proxy run as separate
+# Deployments (own manifests) at higher privilege.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: governed-agent
+  namespace: aegis-workloads
+  annotations:
+    # cluster-level facts the confinement validator reads from annotations
+    aegis.bank/egress: "deny-all-except-proxy"
+    aegis.bank/egress-proxy: "aegis-egress.aegis-system.svc:8443"
+    aegis.bank/pdp-endpoint: "http://aegis-pdp.aegis-system.svc:8787"
+    aegis.bank/audit-sink: "remote"
+    aegis.bank/pids-limit: "128"
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: governed-agent}}
+  template:
+    metadata:
+      labels: {app: governed-agent}
+    spec:
+      automountServiceAccountToken: false      # no ambient k8s identity
+      hostNetwork: false
+      hostPID: false
+      hostIPC: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: agent
+          image: registry.bank-internal.example/aegis/governed-agent:pinned-digest
+          securityContext:
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            limits: {cpu: "1", memory: "512Mi"}
+          env:
+            # the agent reaches the network ONLY through the egress proxy
+            - {name: HTTPS_PROXY, value: "http://aegis-egress.aegis-system.svc:8443"}
+            - {name: HTTP_PROXY,  value: "http://aegis-egress.aegis-system.svc:8443"}
+          volumeMounts:
+            - {name: policy, mountPath: /etc/aegis, readOnly: true}   # policy.json, .sig, pubkey
+            - {name: scratch, mountPath: /scratch, readOnly: false}
+      volumes:
+        - name: policy
+          secret: {secretName: aegis-policy-bundle}   # signed bundle + pinned pubkey
+        - name: scratch
+          emptyDir: {sizeLimit: 256Mi}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: governed-agent-egress
+  namespace: aegis-workloads
+spec:
+  podSelector: {matchLabels: {app: governed-agent}}
+  policyTypes: ["Egress"]
+  egress:
+    # ONLY to the egress proxy and the PDP. No other destination resolves.
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: aegis-system}}
+      ports:
+        - {protocol: TCP, port: 8443}   # egress proxy
+        - {protocol: TCP, port: 8787}   # PDP
+# NOTE: the PDP and egress proxy are deployed in the aegis-system namespace as
+# separate workloads at higher privilege. The policy Secret is signed by the
+# control function; the agent has read-only access and cannot rewrite it, and
+# the pinned pubkey lets the PDP reject any tampered bundle (fail-closed).
