@@ -35,6 +35,7 @@ CORE = [
     ("approvals_test", "approval workflow: grant/deny/timeout, fail-closed silence"),
     ("budget_test", "per-principal daily action/cost ceilings, fail-closed ledger"),
     ("sdk_test", "broker SDK: gate -> approve -> execute -> charge composition"),
+    ("cedar_export", "authz subset exported as Cedar text (interop + analysis)"),
 ]
 OPTIONAL = [
     ("verify_kdb_bridge", "bridges this repo's tools/gate.js (needs Node)"),

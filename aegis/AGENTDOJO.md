@@ -30,27 +30,27 @@ blocked — the gate discriminates on arguments, it doesn't blanket-block.
 
 ## Running the real suite (when you have model budget)
 
+The harness is built: `tools/run_agentdojo_official.py` wires an
+`AegisGatedExecutor` (a drop-in for AgentDojo's `ToolsExecutor` that checks
+every model-requested call against an Aegis `tool_rules` policy) into the
+official pipeline, with per-suite starter policies for
+workspace/banking/travel/slack.
+
 ```bash
-pip install agentdojo
+pip install agentdojo                                  # already in the [benchmarks] extra
+
+python tools/run_agentdojo_official.py --dry-run       # no key: verifies wiring
+                                                       # (passes: 97 tasks across 4 suites load,
+                                                       #  attack-shaped calls block, benign allow)
+
+export ANTHROPIC_API_KEY=...
+python tools/run_agentdojo_official.py --suites banking --tasks 3   # cost-sized smoke
+python tools/run_agentdojo_official.py                              # the full official run
 ```
 
-Wire Aegis in as the tool-execution gate. AgentDojo lets you wrap tool calls;
-insert `AegisToolFilter` so every function the agent requests is checked before
-it runs:
-
-```python
-from aegis.agentdojo_eval import AegisToolFilter
-from aegis.guard import Guard
-from aegis.engine import Engine
-
-flt = AegisToolFilter(Guard(Engine(YOUR_NAMED_TOOL_POLICY)))
-
-def gated_execute(tool_name, args):
-    allowed, decision = flt.allow(tool_name, args, principal=session_id)
-    if not allowed:
-        return f"BLOCKED BY POLICY: {decision.reason}"   # fed back to the agent
-    return real_tool_registry[tool_name](**args)
-```
+It reports benign utility / utility under attack / targeted attack success
+per suite (summary.json), and writes a per-call decision log
+(decisions-<suite>.json) for tuning the `block_if` argument predicates.
 
 Report the three AgentDojo metrics with Aegis on vs off:
 - **benign utility** (no attack),
