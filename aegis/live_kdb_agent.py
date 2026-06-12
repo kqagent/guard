@@ -87,11 +87,24 @@ class KdbTools:
         if not self.q_bin:
             return f"(no q available) proxy-approved query: {safe}"
         script = f"{_SEED}\nres:{safe.replace('.z.d', '2026.06.12')};\n-1 .Q.s res;\nexit 0;"
+        # Run q on a script FILE, not stdin: a WSL-bridged q (q_wsl.cmd) and
+        # native q both accept `q <file> -q`, and a file avoids any stdin
+        # translation layer. Written with LF newlines for q.
+        import os
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix=".q")
         try:
-            p = subprocess.run([self.q_bin, "-q"], input=script,
-                               capture_output=True, text=True, timeout=20)
+            with os.fdopen(fd, "w", newline="\n") as fh:
+                fh.write(script)
+            p = subprocess.run([self.q_bin, path, "-q"],
+                               capture_output=True, text=True, timeout=30)
         except Exception as e:
             return f"q execution error: {type(e).__name__}"
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
         out = (p.stdout or "") + (p.stderr or "")
         if "license error" in out:
             return "q licence invalid/expired — cannot execute"

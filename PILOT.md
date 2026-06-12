@@ -17,7 +17,8 @@ user until the FP rate is known and accepted.*
 | Gate + query proxy on a kdb agent | **wired, shadow-proven** | `python -m aegis.live_kdb_agent --dry-run` |
 | Query rewrites vs **real q** | **PROVEN** | `tools/validate_query_proxy_q.py` → 6/6 against licensed kdb-x q (WSL); rewrite bounded 1000→534 rows |
 | Official AgentDojo score | **harness ready, blocked** | `tools/run_agentdojo_official.py` (needs `ANTHROPIC_API_KEY`) |
-| Live agent soak | **not started** | needs key + licence + a real task set |
+| Live agent (real LLM -> gate -> real q) | **PROVEN (2026-06-12)** | `live_kdb_agent` w/ Haiku: model wrote a date-bounded query, gate allowed, real kdb-x q returned 171 AAPL trades. Windows anthropic + WSL-q bridge (`tools/q_wsl.cmd`). |
+| Live agent soak (volume, FP rate) | **not started** | the above proves the path; a labelled task set + monitor scoring is Stage 2 |
 
 **kdb licence: RESOLVED (2026-06-12).** A licensed **kdb-x Community** runtime
 is installed in WSL at `~/kdbx` (q at `~/kdbx/l64/q`, `kc.lic` decoded from the
