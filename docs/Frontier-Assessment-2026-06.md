@@ -105,15 +105,18 @@ controls. This is our strongest positioning evidence.
 
 ## Highest-leverage evolutions (ranked)
 
-1. **Add Landlock LSM + seccomp-bpf to the confinement runner.** Both Codex and
-   Sandlock use Landlock; we currently rely on namespaces + pivot_root. Landlock
-   gives kernel-enforced filesystem/port scoping that survives even if a mount
-   trick is found; seccomp-bpf cuts the syscall attack surface. Highest security
-   ROI, and it closes the gap to the named frontier sandboxes.
-2. **Offer a microVM substrate option (Firecracker/Kata) for adversarial multi-
-   tenant**, and document the raw-namespace threat model honestly (kernel vulns
-   / side channels out of scope) — matching Sandlock's candor. Don't claim
-   namespace == microVM.
+1. **[DONE 2026-06-14] Landlock LSM filesystem confinement.**
+   `aegis/deploy/landlock_confine.py` — kernel-enforced, unprivileged, no mounts
+   (works where sub-path RO binds don't, e.g. WSL2; identical in prod). Proven
+   `landlock_test.sh` 6/6 + in CI on a native-Linux runner: out-of-allowlist
+   secrets unreadable, system dirs read-only, no-new-privs set. Matches Codex/
+   Sandlock. **Still open:** seccomp-bpf syscall filtering (cuts kernel attack
+   surface further) — next confinement increment.
+2. **[DONE 2026-06-14] microVM substrate option documented** — `deploy/MICROVM.md`
+   (Kata drop-in via runtimeClassName; Firecracker standalone with vsock to the
+   PDP). Threat model stated honestly per Sandlock (kernel vulns / side channels
+   out of scope for the namespace/Landlock default; microVM is the upgrade for
+   adversarial multi-tenant). We do not claim namespace == microVM.
 3. **Keep fail-closed front-and-centre** — it's a real edge over Claude Code's
    default-fail-open sandbox. Make sure our confinement runner also fails closed
    (refuses to run the payload if a namespace/Landlock step fails).

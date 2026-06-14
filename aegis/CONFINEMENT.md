@@ -45,6 +45,38 @@ proves the closing controls are actually configured:
 So: **PDP defers → confinement closes → validator proves the config**. Defense
 in depth, end to end, checkable.
 
+## Runtime enforcement (not just validation) — `deploy/`
+
+The validator above checks that a *deployment descriptor* is hardened. Two
+runnable enforcers actually confine an agent process on the box, from
+unprivileged kernel primitives (no Docker/gVisor needed) — the same class the
+frontier uses (Claude Code = bubblewrap+userns+seccomp; OpenAI Codex =
+bubblewrap+Landlock), but **fail-closed** (Claude Code's sandbox fails *open*
+by default):
+
+- **`landlock_confine.py`** — kernel-enforced filesystem confinement via the
+  **Landlock LSM** (ABI ≥1, Linux ≥5.13). Restricts the process to an explicit
+  read-only + read-write path allowlist, irreversibly, **with no mounts and no
+  root**. Host secrets outside the allowlist become unreadable by the kernel.
+  Because it needs no mount namespace it works where sub-path RO binds don't
+  (e.g. WSL2) and identically in prod. Proven: `deploy/landlock_test.sh`
+  (6/6 — out-of-allowlist secret unreadable, system dirs read-only, scratch
+  writable, no-new-privs set). Compose inside `unshare --net` for network
+  isolation + rlimits.
+- **`confine_run.sh`** — rootless sandbox via user/mount/net/pid/uts/ipc
+  namespaces + pivot_root minimal rootfs + rlimits + no-new-privs, with a
+  **post-setup integrity self-check that refuses to run if system dirs aren't
+  truly read-only** (no false confidence). Proven: `confine_adversarial_test.sh`.
+
+Honest scope (per Sandlock, arXiv:2605.26298): a namespace/Landlock sandbox is
+materially weaker than a microVM against a **kernel-level** attacker — kernel
+vulns, side channels, and deliberate global-resource exhaustion are out of
+scope. For hard multi-tenant adversarial isolation, run the same Aegis policy
+with the agent inside a **microVM (Firecracker / Kata Containers)** — see
+`deploy/MICROVM.md`. Landlock/namespaces are the right default for a
+single-tenant trusted-operator agent; the microVM is the upgrade when the
+workload is adversarial.
+
 ## Deploy artifacts (in `deploy/`)
 
 - `deployment-profile.json` — the normalized profile (source of truth the
@@ -52,6 +84,8 @@ in depth, end to end, checkable.
 - `k8s.yaml` — hardened Deployment + default-deny egress NetworkPolicy.
 - `Dockerfile` — non-root, read-only-friendly image + a reference hardened
   `docker run` line.
+- `confine_run.sh`, `landlock_confine.py` — the runtime enforcers above.
+- `MICROVM.md` — microVM substrate option for adversarial multi-tenant.
 
 ## The per-surface honesty (again)
 

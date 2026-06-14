@@ -39,6 +39,8 @@ jobs:
           sysctl kernel.unprivileged_userns_clone 2>/dev/null || true
       - name: Adversarial confinement test (strategy A — genuine read-only rootfs)
         run: bash aegis/deploy/confine_adversarial_test.sh
+      - name: Landlock filesystem confinement (kernel-enforced, no mounts)
+        run: bash aegis/deploy/landlock_test.sh
 
   deploy-gate:
     name: deployment hardening gate
