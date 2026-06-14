@@ -62,3 +62,22 @@ jobs:
         with: { python-version: "3.12" }
       - run: pip install ruff
       - run: ruff check aegis tools
+
+  package:
+    name: wheel builds + fresh-install works
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Build wheel + sdist
+        run: |
+          pip install build twine
+          python -m build
+          twine check dist/*
+      - name: Install the WHEEL in a clean env and smoke-test (no source tree)
+        run: |
+          python -m venv /tmp/fresh
+          /tmp/fresh/bin/pip install "$(ls dist/*.whl)[signing]"
+          cp tools/smoke_install.py /tmp/smoke_install.py
+          cd /tmp && /tmp/fresh/bin/python /tmp/smoke_install.py
