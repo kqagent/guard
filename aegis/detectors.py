@@ -558,9 +558,55 @@ def detect_kdb_guard(action: Action, policy: dict) -> list[Finding]:
     return []
 
 
+# ===========================================================================
+# file_access — allowlist discipline for file-READ tools (file-plane twin of
+# query_proxy.allowed_tables). Found necessary by the FSP pilot: read_file was
+# gated by a deny-list (protected_paths), so a model probing positions.csv/
+# pnl.csv was ALLOWED and only the file's absence prevented a leak. The lesson
+# generalised: every tool the agent holds needs enumerate-goodness, not just the
+# query tool. A read tool may read ONLY paths under readable_paths; else block.
+# ===========================================================================
+
+def _path_under(file_path: str, prefix: str) -> bool:
+    fp = file_path.replace("\\", "/").lstrip("./")
+    pref = prefix.replace("\\", "/").rstrip("/").lstrip("./")
+    return fp == pref or fp.startswith(pref + "/")
+
+
+def detect_file_access(action: Action, policy: dict) -> list[Finding]:
+    cfg = policy.get("file_access", {})
+    eff = _effect(cfg, "block")
+    read_tools = set(cfg.get("read_tools", ["read_file", "Read"]))
+    if action.tool not in read_tools:
+        return []
+    path = action.file_path  # tool_input file_path | path
+    if not path or not isinstance(path, str):
+        return [Finding(
+            rule_id="FILE-NO-PATH", effect=eff, pack="file_access",
+            reason="file read with no resolvable path — failing closed",
+            remediation="Pass an explicit file path under an allowlisted readable directory.",
+        )]
+    readable = cfg.get("readable_paths")
+    if readable is None:
+        return [Finding(
+            rule_id="FILE-NO-ALLOWLIST", effect=eff, pack="file_access",
+            reason="file_access enabled but no readable_paths configured — failing closed",
+            remediation="Set policy.file_access.readable_paths to the directories the agent may read.",
+        )]
+    if not any(_path_under(path, p) for p in readable):
+        return [Finding(
+            rule_id="FILE-READ-NOT-ALLOWLISTED", effect=eff, pack="file_access",
+            reason=f"read of '{path}' is not under an allowlisted readable path",
+            remediation="Add the directory to policy.file_access.readable_paths if approved.",
+            evidence=path,
+        )]
+    return []
+
+
 DETECTORS = {
     "secrets": detect_secrets,
     "kdb_guard": detect_kdb_guard,
+    "file_access": detect_file_access,
     "exfiltration": detect_exfiltration,
     "pii_egress": detect_pii_egress,
     "destructive_ops": detect_destructive,

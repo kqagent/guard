@@ -113,6 +113,9 @@ class QueryCompiler:
         if isinstance(v, int):
             return str(v)
         if isinstance(v, float):
+            import math
+            if not math.isfinite(v):   # json.loads accepts Infinity/NaN by default
+                self._reject(f"non-finite numeric value not allowed: {v!r}")
             return repr(v)
         if isinstance(v, str):
             if _DATE.match(v):

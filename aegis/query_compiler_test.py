@@ -32,6 +32,9 @@ D = {"from": "2015.01.07", "to": "2015.01.08"}
 CASES = [
     # ---- legitimate desk shapes compile to safe bounded q --------------------
     ("count rows", {"table": "trade", "aggs": [{"fn": "count", "as": "n"}], "date": D}, "count i"),
+    ("non-finite float value (json Infinity) -> reject",
+     {"table": "trade", "columns": ["price"], "date": D,
+      "filters": [{"col": "price", "op": ">", "value": float("inf")}]}, "REJECT"),
     ("size-weighted vwap by sym",
      {"table": "trade", "aggs": [{"fn": "wavg", "col": "price", "weight": "size", "as": "vwap"}],
       "by": ["sym"], "date": D}, "size wavg price"),

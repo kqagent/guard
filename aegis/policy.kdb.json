@@ -13,6 +13,7 @@
   "enabled_packs": [
     "secrets",
     "kdb_guard",
+    "file_access",
     "exfiltration",
     "pii_egress",
     "destructive_ops",
@@ -21,6 +22,7 @@
   ],
   "secrets": {"effect": "block"},
   "kdb_guard": {"effect": "block", "query_tools": ["run_query", "run_q", "qcmd", "query", "exec_q", "kdb_query"]},
+  "file_access": {"effect": "block", "read_tools": ["read_file", "Read"], "readable_paths": ["scratch/", "/data/reports/"]},
   "egress": {
     "effect": "block",
     "allowlist_hosts": ["localhost", "127.0.0.1"]
