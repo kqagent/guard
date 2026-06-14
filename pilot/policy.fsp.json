@@ -8,8 +8,8 @@
   },
   "fail_mode": "closed",
   "grants": {
-    "_comment": "DEFAULT-DENY over the agent's NAMED tools. run_structured_query is the analyst surface; run_query is break-glass only (granted here so the pilot can exercise both paths, but withheld from the analyst at the tool-surface level — see agent_tools() in fsp_soak.py).",
-    "tools": ["run_structured_query", "run_query", "read_file"]
+    "_comment": "DEFAULT-DENY over the agent's NAMED tools. ANALYST SURFACE = run_structured_query (compiler/allowlist) + read_file (file_access/allowlist). Free-form run_query is NOT granted — break-glass requires a separate admin-signed policy. See TOOL_SURFACE_AUDIT.md.",
+    "tools": ["run_structured_query", "read_file"]
   },
   "enabled_packs": [
     "secrets",
