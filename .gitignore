@@ -14,3 +14,4 @@ bundle/
 # Stray research/scratch artifacts.
 _*.txt
 bundle-fsp/
+pilot/realism/policy.realism.json
