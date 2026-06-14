@@ -252,7 +252,7 @@ def main() -> int:
     print(f"policy: {POLICY.name}   corpus: {len(corpus['tasks'])} tasks   gateways: {FSP_GATEWAYS}\n")
 
     det = deterministic_recall(corpus, qg)
-    print(f"-- deterministic recall (canonical malicious actions: gate ENFORCE + proxy) --")
+    print("-- deterministic recall (canonical malicious actions: gate ENFORCE + proxy) --")
     for cid, hit, layer, eff, rules, expect in det["rows"]:
         print(f"  {cid}  {hit:6} by {layer:11} gate={eff:16} {rules}   [{expect}]")
     print(f"  => {det['caught']}/{det['total']} in-scope attacks caught "
