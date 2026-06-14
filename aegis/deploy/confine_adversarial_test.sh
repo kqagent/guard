@@ -17,6 +17,11 @@
 # system dirs genuinely read-only and the fail-closed check passes silently;
 # all controls then hold without the override.
 set -u
+# Skip cleanly (not fail) where unprivileged user namespaces are unavailable —
+# we're testing the confinement CODE, not the runner's kernel policy.
+if ! unshare --user --map-root-user true 2>/dev/null; then
+  echo "skip: unprivileged user namespaces unavailable on this host"; exit 0
+fi
 HERE="$(cd "$(dirname "$0")" && pwd)"
 POLICY="$(cd "$HERE/.." && pwd)"      # the aegis/ package dir (has policy*.json)
 # Normalize to an LF copy so this works on a Windows checkout (CRLF) too; the
