@@ -1,13 +1,21 @@
 # Aegis — guardrails an LLM agent cannot ignore
 
+![ci](https://github.com/kqagent/guard/actions/workflows/ci.yml/badge.svg)
+
 > Working name. A deterministic, fail-closed policy gate that lets an
 > investment bank deploy LLM agents into production with hard controls the
 > model provably cannot bypass — across coding *and* operational agents, with
 > any model (Claude Code, Anthropic/OpenAI/Bedrock API, or behind a gateway).
 
+```bash
+./quickstart.sh                  # zero -> venv + signed bundle + suite + live PDP + proof
+#  .\quickstart.ps1              # Windows
+python -m aegis.run_all_checks   # just the acceptance suite (all 23 core checks)
 ```
-python -m aegis.run_all_checks      # the whole thing, proven in one command
-```
+
+A clean `quickstart` run *is* the demo: it stands up the out-of-process PDP and
+proves it allows a benign action and blocks a destructive one. See `DEPLOY.md`
+for containers/k8s and `PILOT.md` for the monitor→enforce rollout.
 
 ## The one idea
 
@@ -31,17 +39,19 @@ ambiguous is escalated to a human.*
 
 | Layer | What it does | Module | Proof |
 |---|---|---|---|
-| L1 Confinement | sandbox: read-only FS, no direct net, no creds, limits — verified by a deterministic validator | `confinement.py`, `deploy/` | `confinement_test` |
+| L1 Confinement | rootless OS sandbox from kernel primitives (user/mount/net/pid ns + pivot_root + rlimits + no-new-privs), **fail-closed**; plus a deterministic deploy-profile validator | `deploy/confine_run.sh`, `confinement.py`, `deploy/` | `confine_adversarial_test.sh`, `confinement_test` |
 | L2 Broker + MCP manifests | tool calls are brokered; each MCP server is zero-privilege until its manifest grants tools | `guard.py`, `mcp_manifest` | `example_api_loop`, `mcp_test` |
 | L3 Default-deny PDP | allow only granted capabilities; out-of-process; fail-closed | `engine.py`, `pdp_service.py` | `pdp_test`, `demo`, `formal` |
 | L4 Query proxy | parse kdb/SQL, inject date filter + row cap, reject unsafe | `query_proxy.py` | `query_proxy_test` |
 | L4 Egress proxy | real-destination allowlist + SSRF guard + payload DLP | `egress_proxy.py` | `egress_proxy_test` |
 | L4 Named-tool rules | per-tool argument policy for function-calling agents | `tool_rules` | `agentdojo_eval` |
-| L5 Integrity | Ed25519-signed policy, pinned key, read-only mount | `signing.py`, `deploy/k8s.yaml` | `signing_test` |
-| L7 Audit | hash-chained + off-host mirror + anchor (truncation-proof) | `audit.py` | `audit_worm_test` |
-| L8 Assurance | exhaustive formal proof; adversarial corpus; shadow FP/recall; self-verifying compliance crosswalk | `formal.py`, `redteam_corpus.py`, `monitor.py`, `compliance.py` | `formal`, `redteam_corpus`, `monitor`, `compliance`, `agentdojo_eval` |
+| L6 Runtime supervisor + kill switch | watches the decision *sequence*; tripwires trip a per-principal circuit breaker (fail-closed) + fire a configurable kill (SIGTERM / `docker kill` / `kubectl delete`) + write an incident | `supervisor.py` | `supervisor_test` |
+| L6 LLM overseer (2nd line) | a *separate* model reads the redacted audit, flags intent-drift / staged attacks, narrates incidents — advisory, never the only thing | `overseer.py` | `overseer_test` |
+| L7 Integrity | Ed25519-signed policy, pinned key, read-only mount | `signing.py`, `deploy/k8s.yaml` | `signing_test` |
+| L7 Audit | hash-chained + off-host mirror + anchor (truncation-proof); WORM sink adapters (syslog/HTTP/S3-Object-Lock) | `audit.py`, `worm_sinks.py` | `audit_worm_test`, `worm_sinks_test` |
+| L8 Assurance | exhaustive proof **+ Z3/SMT proof over unbounded domains**; adversarial corpus; shadow FP/recall; self-verifying compliance crosswalk; cost budgets + approval workflow + broker SDK | `formal.py`, `formal_smt.py`, `redteam_corpus.py`, `monitor.py`, `compliance.py`, `budget.py`, `approvals.py`, `sdk.py` | `formal`, `formal_smt`, `redteam_corpus`, `monitor`, `compliance`, `budget_test`, `approvals_test`, `sdk_test` |
 
-Every row is a passing, deterministic test. `run_all_checks` runs all 15.
+Every row is a passing, deterministic test. `run_all_checks` runs all 23 core.
 
 ## Why it can't be ignored
 
@@ -190,10 +200,20 @@ agent actions, fail-closed, fully audited" are overclaims.
 
 ## Status
 
-Alpha. The full watertight design is implemented and every layer is proven by a
-deterministic test (`run_all_checks` → all 15 core green). Remaining: official
-AgentDojo live run and a Z3/Cedar lift of the formal proof (budget/effort), plus
-P3 niceties (broker SDK, approval-workflow backend, RBAC + cost budgets, WORM
-sink adapters).
+Alpha, but broad. Every layer is proven by a deterministic test
+(`run_all_checks` → **all 23 core green**), and CI runs the suite on Python
+3.10–3.12 plus the OS-confinement adversarial test on a native-Linux runner.
+Shipped since the first cut: Z3/SMT proof over unbounded domains, the runtime
+supervisor + circuit-breaker kill switch, the LLM overseer, WORM sink adapters,
+per-principal cost budgets, the approval workflow, the broker SDK, the kdb+/q
+query proxy proven against a real kdb-x runtime, and one-command deploy.
+
+The two things still genuinely open are **not code**: a third-party security
+audit, and a design-partner pilot producing a real false-positive number on
+production traffic (run Aegis in monitor mode — see `PILOT.md`). Engineering
+roadmap from the frontier assessment (`docs/Frontier-Assessment-2026-06.md`):
+add Landlock LSM + seccomp-bpf to the confinement runner, offer a microVM
+substrate (Firecracker/Kata) for adversarial multi-tenant, and adopt Cedar as
+an interchange policy language (exporter already in `cedar_export.py`).
 
 MIT.
