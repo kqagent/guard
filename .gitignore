@@ -13,3 +13,4 @@ bundle/
 *.KEEP-SECRET
 # Stray research/scratch artifacts.
 _*.txt
+bundle-fsp/
