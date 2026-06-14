@@ -56,6 +56,9 @@ _WIN_FNS = {"sums", "maxs", "mins", "prds", "deltas", "ratios", "reverse"}
 _EXPR_AGGS = {"avg", "sum", "min", "max", "count", "first", "last",
               "dev", "var", "med", "countdistinct"}
 _MAX_EXPR_DEPTH = 6  # bound recursion; a desk expression is never deeper
+_MAX_CLAUSE_ITEMS = 64  # cap select/agg/filter/by list lengths — a real desk
+                        # query never has this many, and it stops a giant request
+                        # expanding into a huge compiled query (resource guard).
 
 
 class StructuredQueryRejected(Exception):
@@ -97,6 +100,14 @@ class QueryCompiler:
 
     def _reject(self, msg: str):
         raise StructuredQueryRejected(msg)
+
+    def _list(self, v, what: str) -> list:
+        """Validate a clause list and bound its length (resource guard)."""
+        if not isinstance(v, list):
+            self._reject(f"{what} must be a list")
+        if len(v) > _MAX_CLAUSE_ITEMS:
+            self._reject(f"{what} has {len(v)} items (max {_MAX_CLAUSE_ITEMS}) — failing closed")
+        return v
 
     def _table(self, table) -> str:
         if not isinstance(table, str) or not _IDENT.match(table):
@@ -184,8 +195,7 @@ class QueryCompiler:
         sel = req.get("select")
         if not sel:
             return None, set()
-        if not isinstance(sel, list):
-            self._reject("select must be a list of {as, expr}")
+        self._list(sel, "select")
         parts, aliases = [], set()
         for item in sel:
             if not isinstance(item, dict) or "expr" not in item or "as" not in item:
@@ -202,8 +212,7 @@ class QueryCompiler:
     def _select_expr(self, req: dict, cols_allowed: set) -> str:
         aggs = req.get("aggs")
         if aggs:
-            if not isinstance(aggs, list):
-                self._reject("aggs must be a list")
+            self._list(aggs, "aggs")
             parts = []
             for a in aggs:
                 if not isinstance(a, dict):
@@ -236,8 +245,7 @@ class QueryCompiler:
             return ", ".join(parts)
         columns = req.get("columns")
         if columns:
-            if not isinstance(columns, list):
-                self._reject("columns must be a list")
+            self._list(columns, "columns")
             return ", ".join(self._col(c, cols_allowed) for c in columns)
         return ""  # select all columns
 
@@ -257,7 +265,7 @@ class QueryCompiler:
             # bucket a TIMESTAMP column by a timespan: `0D00:05 xbar time`
             # (a bare `00:05` is a minute type and `type`-errors against a timestamp).
             clauses.append(f"{alias}:0D{size} xbar {bcol}")
-        for c in req.get("by", []) or []:
+        for c in self._list(req.get("by", []) or [], "by"):
             clauses.append(self._col(c, cols_allowed))
         return (" by " + ", ".join(clauses)) if clauses else ""
 
@@ -280,7 +288,7 @@ class QueryCompiler:
             self._reject(f"table '{table}' is partitioned — a date range is required")
 
         # structured filters
-        for f in req.get("filters", []) or []:
+        for f in self._list(req.get("filters", []) or [], "filters"):
             if not isinstance(f, dict):
                 self._reject("each filter must be an object")
             col = self._col(f.get("col"), cols_allowed)

@@ -32,6 +32,8 @@ D = {"from": "2015.01.07", "to": "2015.01.08"}
 CASES = [
     # ---- legitimate desk shapes compile to safe bounded q --------------------
     ("count rows", {"table": "trade", "aggs": [{"fn": "count", "as": "n"}], "date": D}, "count i"),
+    ("oversized clause list (resource guard) -> reject",
+     {"table": "trade", "columns": ["sym"] * 5000, "date": D}, "REJECT"),
     ("non-finite float value (json Infinity) -> reject",
      {"table": "trade", "columns": ["price"], "date": D,
       "filters": [{"col": "price", "op": ">", "value": float("inf")}]}, "REJECT"),
