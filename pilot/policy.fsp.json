@@ -47,7 +47,12 @@
     "allowed_tables": ["trade", "trades", "quote", "quotes", "orders", "executions"],
     "require_date_tables": ["trade", "trades", "quote", "quotes", "orders", "executions"],
     "max_rows": 1000000,
-    "default_date": "2015.01.08"
+    "default_date": "2015.01.08",
+    "columns": {
+      "trade": ["date", "time", "sym", "price", "size", "stop", "cond", "ex", "side"],
+      "quote": ["date", "time", "sym", "bid", "ask", "bsize", "asize", "mode", "ex", "src"]
+    },
+    "agg_fns": ["avg", "sum", "min", "max", "count", "first", "last", "wavg", "dev", "var", "med", "cor", "wsum"]
   },
   "supervisor": {
     "enabled": true,
