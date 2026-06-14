@@ -41,6 +41,7 @@ CORE = [
     ("cedar_export", "authz subset exported as Cedar text (interop + analysis)"),
     ("supervisor_test", "runtime supervisor: tripwires + circuit breaker + kill switch + incidents"),
     ("overseer_test", "LLM overseer (2nd line): reads logs, advisory verdict + incident narrative"),
+    ("overseer_wiring_test", "overseer wired advisory-only: narrative attached, gate identical, no allow/clear path"),
 ]
 OPTIONAL = [
     ("verify_kdb_bridge", "bridges this repo's tools/gate.js (needs Node)"),

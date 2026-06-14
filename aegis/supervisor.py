@@ -78,7 +78,8 @@ class Incident:
     timeline: list[dict] = field(default_factory=list)   # recent {ts,tool,effect,rules,target}
     killed: bool = False
     kill_detail: str = ""
-    narrative: str = ""        # optional, filled by the LLM overseer
+    narrative: str = ""        # optional, filled by the LLM overseer (advisory)
+    overseer_concern: str = ""  # optional: none|low|medium|high (advisory)
 
     def render(self) -> str:
         lines = [
@@ -97,7 +98,9 @@ class Incident:
             lines.append(f"    {ts}  {e.get('effect','?'):<16} {e.get('tool',''):<10} "
                          f"{str(e.get('target',''))[:48]:<48} [{rules}]")
         if self.narrative:
-            lines += ["", "  overseer narrative:", "    " + self.narrative.replace("\n", "\n    ")]
+            concern = f" (concern: {self.overseer_concern})" if self.overseer_concern else ""
+            lines += ["", f"  overseer narrative{concern} [ADVISORY — non-gating]:",
+                      "    " + self.narrative.replace("\n", "\n    ")]
         return "\n".join(lines)
 
 
@@ -189,7 +192,7 @@ class _KillSwitch:
 class Supervisor:
     """Watches the decision stream, trips the breaker + kills on a tripwire."""
 
-    def __init__(self, cfg: dict, kill_callback=None):
+    def __init__(self, cfg: dict, kill_callback=None, overseer=None):
         self.cfg = cfg or {}
         self.window = float(self.cfg.get("window_seconds", 300))
         self.enforce_in_monitor = bool(self.cfg.get("enforce_in_monitor", False))
@@ -198,6 +201,21 @@ class Supervisor:
         self.incident_dir.mkdir(parents=True, exist_ok=True)
         self.kill = _KillSwitch(self.cfg.get("kill"), kill_callback)
         self.tw = self.cfg.get("tripwires", {})
+        # Optional LLM overseer (2nd line). ADVISORY ONLY: it runs strictly AFTER
+        # the deterministic breaker/kill decision is made and an incident already
+        # exists; it can only ATTACH a narrative + concern to that incident. It is
+        # never consulted in any allow/block/clear path — an LLM is bypassable, so
+        # the deterministic supervisor stays load-bearing. Built lazily from policy
+        # (overseer.enabled, default off) and import-guarded: no key / no anthropic
+        # / any error => narrative is omitted and the gate is wholly unaffected.
+        self.overseer = overseer
+        if self.overseer is None and (self.cfg.get("overseer") or {}).get("enabled"):
+            try:
+                from .overseer import LLMOverseer
+                self.overseer = LLMOverseer(
+                    model=self.cfg["overseer"].get("model", "claude-haiku-4-5-20251001"))
+            except Exception:
+                self.overseer = None  # overseer must never break the supervisor
         # In-memory per-principal event window. (For a multi-process PDP this
         # would be a shared store; loopback single-process is the common case.)
         self._events: dict[str, list[dict]] = {}
@@ -253,6 +271,18 @@ class Supervisor:
             incident.kill_detail = detail
         else:
             incident.kill_detail = "monitor mode: incident recorded, kill NOT executed"
+
+        # 2nd line (advisory): attach an overseer narrative + concern to the
+        # ALREADY-DECIDED incident. This happens after the breaker/kill above; it
+        # cannot change `active`, untrip the breaker, or alter any decision. Any
+        # failure is swallowed — the incident is still written without a narrative.
+        if self.overseer is not None:
+            try:
+                self.overseer.narrate_incident(incident)
+                verdict = self.overseer.review(list(win))
+                incident.overseer_concern = verdict.concern
+            except Exception as e:
+                incident.narrative = f"(overseer unavailable: {type(e).__name__})"
 
         self._write_incident(incident)
         return incident
