@@ -167,21 +167,38 @@ class QueryGuard:
                 out = out + f" where date={self.default_date}"
             injected.append(f"date={self.default_date}")
 
-        # Row cap. We bound with a `where i<N` predicate rather than the
-        # `select[N]` virtual-index form: `select[N]` throws `nyi` on PARTITIONED
-        # kdb+ tables (the standard HDB layout), so it would make the proxy emit
-        # a query the database rejects — breaking the core guarantee that the DB
-        # only ever receives a *runnable* safe query. `where ... i<N` is
-        # partition-safe, caps rows, and composes with `by` grouping.
-        # (Verified against licensed kdb+ 4.1 on a real partitioned HDB.)
-        out_low = out.lower()
-        has_cap = bool(re.match(r"\s*select\s*\[", out_low)) or bool(re.search(r"\bi\s*<", out_low))
-        if re.match(r"\s*select\b", low) and not has_cap:
-            if re.search(r"(?i)\bwhere\b", out):
-                out = out + f", i<{self.max_rows}"
-            else:
-                out = out + f" where i<{self.max_rows}"
-            injected.append(f"row-cap=i<{self.max_rows}")
+        # Row cap. The proxy GUARANTEES the outgoing query reads <= max_rows; it
+        # does not take a caller-supplied cap on trust. A cap that is present and
+        # already within max_rows is left alone; an over-limit cap is TIGHTENED;
+        # an absent cap is INJECTED. We bound with a `where i<N` predicate rather
+        # than `select[N]` — `select[N]` throws `nyi` on PARTITIONED kdb+ tables
+        # (the standard HDB layout), so it would make the proxy emit a query the
+        # DB rejects, breaking the guarantee that the DB only ever receives a
+        # *runnable* safe query. `where ... i<N` is partition-safe and composes
+        # with `by`. (Verified against licensed kdb+ 4.1 on a real partitioned HDB.)
+        if re.match(r"\s*select\b", low):
+            capped = False
+            # tighten an over-limit virtual-index `i<N`
+            m = re.search(r"\bi\s*<\s*(\d+)", out)
+            if m:
+                capped = True
+                if int(m.group(1)) > self.max_rows:
+                    out = re.sub(r"(\bi\s*<\s*)\d+", rf"\g<1>{self.max_rows}", out, count=1)
+                    injected.append(f"tightened-cap=i<{self.max_rows}")
+            # tighten an over-limit `select[N]` (caller's form kept; value bounded)
+            m2 = re.search(r"(?i)select\s*\[\s*(\d+)", out)
+            if m2:
+                capped = True
+                if int(m2.group(1)) > self.max_rows:
+                    out = re.sub(r"(?i)(select\s*\[\s*)\d+", rf"\g<1>{self.max_rows}", out, count=1)
+                    injected.append(f"tightened-cap=select[{self.max_rows}]")
+            # no cap of any kind -> inject one
+            if not capped:
+                if re.search(r"(?i)\bwhere\b", out):
+                    out = out + f", i<{self.max_rows}"
+                else:
+                    out = out + f" where i<{self.max_rows}"
+                injected.append(f"row-cap=i<{self.max_rows}")
 
         if injected:
             return QueryVerdict("rewrite", "q", safe_query=out, tables=[table],
