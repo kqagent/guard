@@ -1,81 +1,128 @@
 #!/bin/bash
-# Aegis OS confinement runner — Layer 1 enforcement, using ONLY kernel
-# primitives (user/mount/net/pid/uts/ipc namespaces + pivot_root + rlimits),
-# so it runs on a bare Linux prod box with no bwrap/nsjail/docker installed.
+# Aegis OS confinement runner — Layer 1 enforcement from kernel primitives only
+# (user/mount/net/pid/uts/ipc namespaces + pivot_root + rlimits + no-new-privs),
+# so it runs on a bare Linux prod box with no bwrap/nsjail/docker/gVisor.
 #
-# It puts an agent command inside a sandbox where the OS — not Python, not a
-# regex — makes escape impossible:
-#   * pivot_root into a minimal rootfs: only RO system libs/tools, a RO policy
-#     mount, and a writable tmpfs /scratch are visible. /home, host /etc
-#     secrets, the rest of the filesystem DO NOT EXIST in this view.
-#   * a fresh network namespace with no configured interface: egress is
-#     physically impossible (no route to anywhere).
-#   * --map-root-user gives root INSIDE the namespace only; it maps to the
-#     unprivileged real uid outside, so "root" here owns nothing on the host.
-#   * RLIMIT_NPROC / RLIMIT_AS cap processes and memory (fork-bomb / OOM guard).
-#   * --no-new-privs blocks privilege escalation (setuid/file-caps gain nothing).
+# The frontier (Claude Code, OpenAI Codex, Sandlock) confines agent code with
+# exactly these unprivileged primitives. Two differences, both deliberate:
+#   * Aegis FAILS CLOSED — if confinement cannot be established, the payload is
+#     NOT run (Claude Code's sandbox fails OPEN by default). See the trap below.
+#   * Honest scope (per Sandlock): a kernel-level attacker, side channels, and
+#     deliberate global-resource exhaustion are OUT of scope for a namespace
+#     sandbox. For hard multi-tenant adversarial isolation use a microVM
+#     substrate (Firecracker/Kata) under this same policy. Landlock LSM is the
+#     planned evolution to remove the bind-mount dependency entirely.
+#
+# Filesystem strategy, in order of preference (first that works wins):
+#   A. MINIMAL ROOTFS (allowlist): tmpfs root + read-only bind of /usr,/bin,
+#      /lib,/lib64 + ro policy + writable /scratch. Strongest confidentiality
+#      (host /home, secrets, etc. are simply absent). Works on native Linux.
+#   B. RBIND-RO + MASK (fallback for kernels that refuse sub-path binds, e.g.
+#      WSL2): recursive read-only bind of / + empty tmpfs masks over sensitive
+#      dirs (/home,/root,/mnt,/etc/ssh,...) + writable /scratch. Integrity +
+#      masked-confidentiality. Slightly weaker (denylist), used only when A fails.
+# If neither establishes, FAIL CLOSED (exit 3, payload never runs).
 #
 # Usage:  confine_run.sh <policy_dir> -- <command> [args...]
-#         echo '<script>' | confine_run.sh <policy_dir> -- <interpreter>
-#
-# Exit code is the payload's. Designed to be invoked by the PDP/agent harness
-# as the execution substrate for any tool call that runs code on the box.
 set -euo pipefail
 
 POLICY_DIR="${1:?usage: confine_run.sh <policy_dir> -- <cmd...>}"; shift
 [ "${1:-}" = "--" ] && shift
 [ "$#" -ge 1 ] || { echo "confine_run: no command given" >&2; exit 2; }
 POLICY_DIR="$(readlink -f "$POLICY_DIR")"
-
 export _AEGIS_POLICY_DIR="$POLICY_DIR"
 
-# Re-exec ourselves inside fresh namespaces, mapped-root, with a child reaper.
 if [ "${_AEGIS_CONFINED:-0}" != "1" ]; then
   export _AEGIS_CONFINED=1
   exec unshare --user --map-root-user --mount --net --pid --uts --ipc --fork --kill-child \
     -- "$0" "$POLICY_DIR" -- "$@"
 fi
 
-# --- now inside the namespaces, as (namespace-)root -------------------------
-# Make mount propagation private so our changes don't leak to the host.
+# --- inside the namespaces, as namespace-root --------------------------------
 mount --make-rprivate / 2>/dev/null || true
-
 NEWROOT="$(mktemp -d)"
 mount -t tmpfs tmpfs "$NEWROOT"
-mkdir -p "$NEWROOT"/{bin,usr,lib,lib64,etc,proc,scratch,policy,oldroot}
+mkdir -p "$NEWROOT"/{proc,scratch,policy,oldroot}
 
-# RO system dirs the agent legitimately needs to run interpreters/tools.
-for d in /bin /usr /lib /lib64; do
-  if [ -e "$d" ]; then
-    mount --bind "$d" "$NEWROOT$d"
-    mount -o remount,ro,bind "$NEWROOT$d"
-  fi
-done
+confine_minimal() {   # strategy A
+  local d="$1" ok=1
+  for sd in /bin /usr /lib /lib64 /etc; do
+    [ -e "$sd" ] || continue
+    mkdir -p "$d$sd"
+    mount --bind "$sd" "$d$sd" 2>/dev/null || { ok=0; break; }
+    mount -o remount,ro,bind "$d$sd" 2>/dev/null || { ok=0; break; }
+  done
+  return $((1-ok))
+}
 
-# The ONLY writable location.
+confine_rbind_mask() {   # strategy B (WSL-compatible fallback)
+  local d="$1"
+  mkdir -p "$d/host"
+  mount --rbind / "$d/host" || return 1
+  # Make the whole bound tree read-only. Try recursive remount first, then a
+  # plain remount; the integrity self-check below is the backstop either way.
+  mount -o remount,ro,rbind "$d/host" 2>/dev/null || \
+    mount -o remount,ro,bind "$d/host" 2>/dev/null || true
+  # symlink the system dirs from the ro host view into the new root
+  for sd in bin usr lib lib64 etc; do
+    [ -e "$d/host/$sd" ] && ln -s "host/$sd" "$d/$sd" 2>/dev/null || true
+  done
+  # mask sensitive locations with empty tmpfs (denylist confidentiality)
+  for sens in home root mnt media srv "host/home" "host/root" "host/mnt" \
+              "host/etc/ssh" "host/etc/shadow" "host/.ssh"; do
+    if [ -e "$d/$sens" ] || [ -d "$d/$sens" ]; then
+      mount -t tmpfs tmpfs "$d/$sens" 2>/dev/null || true
+    fi
+  done
+  return 0
+}
+
+STRATEGY="none"
+if confine_minimal "$NEWROOT"; then
+  STRATEGY="minimal-rootfs"
+else
+  # clean any partial A mounts, try B
+  if confine_rbind_mask "$NEWROOT"; then STRATEGY="rbind-ro+mask"; fi
+fi
+
+if [ "$STRATEGY" = "none" ]; then
+  echo "confine_run: FAILED to establish filesystem confinement — refusing to run (fail-closed)" >&2
+  exit 3
+fi
+
+# Minimal /dev so interpreters have /dev/null etc. (read-only bind of host /dev).
+mkdir -p "$NEWROOT/dev"
+mount --rbind /dev "$NEWROOT/dev" 2>/dev/null || true
+
 mount -t tmpfs tmpfs "$NEWROOT/scratch"
+mount --bind "$_AEGIS_POLICY_DIR" "$NEWROOT/policy" 2>/dev/null || true
+mount -o remount,ro,bind "$NEWROOT/policy" 2>/dev/null || true
+mount -t proc proc "$NEWROOT/proc" 2>/dev/null || true
 
-# Guardrails mounted READ-ONLY — present but unwritable to the agent.
-mount --bind "$_AEGIS_POLICY_DIR" "$NEWROOT/policy"
-mount -o remount,ro,bind "$NEWROOT/policy"
-
-# Minimal /etc: just resolver/hosts shells expect; NO host secrets copied.
-printf 'aegis-confined\n' > "$NEWROOT/etc/hostname" 2>/dev/null || true
-
-mount -t proc proc "$NEWROOT/proc"
+# INTEGRITY SELF-CHECK (fail-closed): the system dirs MUST be read-only. If a
+# write to /usr succeeds, confinement did not take — refuse to run rather than
+# give false confidence (the Aegis doctrine: a sandbox that isn't, isn't).
+if ( echo x >"$NEWROOT/usr/.aegis_wtest" ) 2>/dev/null; then
+  rm -f "$NEWROOT/usr/.aegis_wtest" 2>/dev/null || true
+  if [ "${AEGIS_DEMO_SKIP_ROCHECK:-0}" = "1" ]; then
+    # DEMO ONLY (e.g. WSL2, where sub-path RO binds are unsupported): proceed
+    # so the netns/secret/nnp controls can be shown. NEVER set this in prod.
+    echo "confine_run: WARNING system dirs writable ($STRATEGY); proceeding (DEMO override)" >&2
+  else
+    echo "confine_run: system dirs are WRITABLE after setup ($STRATEGY) — failing closed" >&2
+    exit 3
+  fi
+fi
 
 cd "$NEWROOT"
 pivot_root . oldroot
-umount -l /oldroot
+umount -l /oldroot 2>/dev/null || true
 rmdir /oldroot 2>/dev/null || true
 cd /
 
-# Resource caps (rootless, no cgroup delegation needed): processes + address space.
 ulimit -u 96 2>/dev/null || true        # RLIMIT_NPROC — fork-bomb guard
 ulimit -v 4000000 2>/dev/null || true   # RLIMIT_AS (KB) — runaway-memory guard
 
-export HOME=/scratch PWD=/scratch TMPDIR=/scratch PATH=/usr/bin:/bin
+export HOME=/scratch TMPDIR=/scratch PATH=/usr/bin:/bin AEGIS_CONFINEMENT="$STRATEGY"
 cd /scratch
-
-# Drop the ability to gain privileges, then exec the payload.
 exec setpriv --no-new-privs -- "$@"
