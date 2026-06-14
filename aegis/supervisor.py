@@ -59,7 +59,7 @@ from pathlib import Path
 # tripwire treats that as suspicious ("no correct action code").
 _KNOWN_TOOLS = {
     "Bash", "Shell", "PowerShell", "Read", "Write", "Edit", "MultiEdit",
-    "NotebookEdit", "Glob", "Grep", "run_query", "read_file",
+    "NotebookEdit", "Glob", "Grep", "run_query", "run_structured_query", "read_file",
 }
 
 
@@ -268,7 +268,10 @@ class Supervisor:
             return "critical_rules", f"critical rule(s) fired: {', '.join(hit)}"
 
         ua = tw.get("unknown_action")
-        if ua and ua.get("enabled") and ev["tool"] not in _KNOWN_TOOLS and not ev["rules"]:
+        # A deployment can declare its own tool surface via known_tools, extending
+        # the built-in defaults — so a new analyst tool isn't mistaken for a probe.
+        known = _KNOWN_TOOLS | set((ua or {}).get("known_tools", []))
+        if ua and ua.get("enabled") and ev["tool"] not in known and not ev["rules"]:
             return "unknown_action", (f"unclassified action '{ev['tool']}' with no policy "
                                       f"classification (no recognised action code)")
 

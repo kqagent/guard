@@ -77,21 +77,31 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def make_server(policy_path, audit_path=None, host="127.0.0.1", port=8787,
-                pinned_pubkey=None, signature_path=None, sig_algo=None) -> _PDPServer:
+                pinned_pubkey=None, signature_path=None, sig_algo=None,
+                sink_path=None, strict=False) -> _PDPServer:
     """Build (but do not start) the PDP server. Port 0 picks a free port;
     read the chosen port from `server.server_address[1]`. When `pinned_pubkey`
     is given, the policy must carry a valid signature or the engine fails
-    closed (blocks everything)."""
+    closed (blocks everything). When `sink_path` is given, every decision is
+    mirrored to an off-host WORM sink and the chain head is anchored (so
+    truncation/rewind is detectable); with `strict`, a sink write failure makes
+    the audit append raise — fail-closed on lost audit."""
     engine = Engine.load(policy_path, audit_path=audit_path,
                          pinned_pubkey=pinned_pubkey, signature_path=signature_path,
                          sig_algo=sig_algo)
+    if sink_path and audit_path:
+        from .audit import AuditLog
+        from .worm_sinks import FileSink
+        engine.audit = AuditLog(audit_path, anchor_path=str(audit_path) + ".anchor",
+                                sinks=[FileSink(sink_path)], strict_sinks=strict)
     return _PDPServer((host, port), _Handler, engine)
 
 
 def serve(policy_path, audit_path=None, host="127.0.0.1", port=8787,
-          pinned_pubkey=None, signature_path=None, sig_algo=None) -> None:
+          pinned_pubkey=None, signature_path=None, sig_algo=None,
+          sink_path=None, strict=False) -> None:
     httpd = make_server(policy_path, audit_path, host, port,
-                        pinned_pubkey, signature_path, sig_algo)
+                        pinned_pubkey, signature_path, sig_algo, sink_path, strict)
     bound = httpd.server_address
     print(f"Aegis PDP listening on http://{bound[0]}:{bound[1]}  (policy={policy_path})")
     if httpd.engine.load_error:
@@ -111,9 +121,12 @@ def main() -> int:
     ap.add_argument("--pubkey", default=None, help="pinned public key (hex); requires a signed policy")
     ap.add_argument("--sig", default=None, help="path to the detached signature (default <policy>.sig)")
     ap.add_argument("--algo", default=None)
+    ap.add_argument("--sink", default=None, help="off-host WORM sink path (mirror every decision)")
+    ap.add_argument("--strict", action="store_true", help="fail-closed if the WORM sink write fails")
     args = ap.parse_args()
     serve(args.policy, args.audit, args.host, args.port,
-          pinned_pubkey=args.pubkey, signature_path=args.sig, sig_algo=args.algo)
+          pinned_pubkey=args.pubkey, signature_path=args.sig, sig_algo=args.algo,
+          sink_path=args.sink, strict=args.strict)
     return 0
 
 
