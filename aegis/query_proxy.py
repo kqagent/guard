@@ -50,8 +50,13 @@ _DANGEROUS_Q = [
     ("Q-ENV",           r"\b(get|set)env\b"),
     ("Q-CONN",          r"\bhopen\b|\bhclose\b"),
     ("Q-FILE-DELETE",   r"\bhdel\b"),
-    ("Q-FILE-WRITE",    r"\bset\b|\b[rd]?save\b|\bhsym\b|\bread[01]\b|(?<![:\w])[012]:"),
-    ("Q-DYNAMIC-EVAL",  r"\bvalue\b|\beval\b|\bparse\b|\bget\b"),
+    ("Q-FILE-WRITE",    r"\bset\b|\b[rd]?save\b|\bhsym\b|\bread[01]\b|(?<![:\w])[012]:|(?<![\w.])-11!"),
+    # .Q write/enumerate utilities: .Q.en/.Q.dpft/.Q.dpfts/.Q.dpt/.Q.dsave persist
+    # to disk and write the sym file (HDB corruption). Narrow on purpose — benign
+    # .Q.dd/.Q.pf/.Q.qt/.Q.fmt reads must NOT trip. (low is already lowercased.)
+    ("Q-HDB-WRITE",     r"\.q\.(?:en|dpfts?|dpt|dsave)\b"),
+    # `reval` is restricted-eval; `\br?eval\b` covers both eval and reval.
+    ("Q-DYNAMIC-EVAL",  r"\bvalue\b|\br?eval\b|\bparse\b|\bget\b"),
     # Handler HIJACK = assigning a .z callback (.z.pg:{...}); plain .z.d/.z.p/.z.t
     # date/time reads are benign and must NOT trip — so require an assignment ':'.
     ("Q-HANDLER-EXIT",  r"\.z\.\w+\s*:|\bexit\b"),

@@ -72,6 +72,17 @@ CASES = [
      "select x from (update price:0 from `trade) where date=.z.d", "reject", None),
     ("q: 2: dynamic shared-object load -> reject",
      'select (`:libx 2: (`f;1)) from trade where date=.z.d', "reject", None),
+    ("q: .Q.en sym-file write -> reject",
+     "select .Q.en[`:/data/hdb;trade] from trade where date=.z.d", "reject", None),
+    ("q: .Q.dpft partition write -> reject",
+     "select .Q.dpft[`:/hdb;();`sym;`trade] from trade where date=.z.d", "reject", None),
+    ("q: reval dynamic-eval bypass -> reject",
+     'select reval ("system";"id") from trade where date=.z.d', "reject", None),
+    ("q: -11! log replay/execute -> reject",
+     "select -11!`:/data/tp.log from trade where date=.z.d", "reject", None),
+    # benign .Q utilities must STILL pass (not rejected) — capped like any read
+    ("q: benign .Q.dd path-join not over-blocked",
+     "select from trade where date=.z.d, p:.Q.dd[`a;`b]", "rewrite", ".Q.dd"),
     # benign date/time .z reads and functional update must STILL pass (no over-block)
     ("q: benign .z.d date read -> not rejected by handler rule",
      "select from quote where date=.z.d, i<100", "allow", None),
