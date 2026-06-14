@@ -29,6 +29,40 @@ from pathlib import Path
 
 _MUTATIONS = ("update", "delete", "insert", "upsert", "drop", "truncate", "alter")
 
+# Dangerous q/kdb+ constructs that must NEVER reach the database, even embedded
+# inside an otherwise-valid `select ... from <allowlisted>`. The proxy enumerates
+# goodness on STRUCTURE (read on an allowlisted table) — but a select body can
+# still call OS/file/eval builtins, so we also veto these tokens. A real kdb+
+# agent surface should never need them in a read query; failing closed on them
+# beats trusting the rest of the expression. Each is (rule, regex).
+#   system/getenv/setenv  -> arbitrary shell on the kdb host (rm/kill/chmod ...)
+#   hopen/hclose          -> outbound connections (exfil / lateral movement)
+#   hdel                  -> delete files / HDB partition directories
+#   set/save/rsave/dsave/hsym/read0/read1/[012]: -> file I/O incl. overwriting the
+#                            sym file (corrupts every symbol column in the HDB) and
+#                            `2:` dynamic shared-object load
+#   value/eval/parse/get  -> dynamic eval (defeats static analysis) / file read
+#   .z. / exit            -> hijack message handlers (.z.pg/.z.ps...) / kill process
+#   .[ @[                 -> amend-in-place mutation (?[ ![ already rejected below)
+#   insert/upsert/delete/update anywhere -> mutation laundered past the leading-word check
+_DANGEROUS_Q = [
+    ("Q-SYSTEM-EXEC",   r"\bsystem\b"),
+    ("Q-ENV",           r"\b(get|set)env\b"),
+    ("Q-CONN",          r"\bhopen\b|\bhclose\b"),
+    ("Q-FILE-DELETE",   r"\bhdel\b"),
+    ("Q-FILE-WRITE",    r"\bset\b|\b[rd]?save\b|\bhsym\b|\bread[01]\b|(?<![:\w])[012]:"),
+    ("Q-DYNAMIC-EVAL",  r"\bvalue\b|\beval\b|\bparse\b|\bget\b"),
+    # Handler HIJACK = assigning a .z callback (.z.pg:{...}); plain .z.d/.z.p/.z.t
+    # date/time reads are benign and must NOT trip — so require an assignment ':'.
+    ("Q-HANDLER-EXIT",  r"\.z\.\w+\s*:|\bexit\b"),
+    ("Q-AMEND",         r"\.\[|@\["),
+    # PERSISTENT mutation only. Functional `update/delete ... from <t>` returns a
+    # derived table and does not persist; the dangerous forms target a BACKTICK
+    # global (`update ... from `trade`, insert[`trade;..], `trade upsert ..). The
+    # leading-word check below still rejects a query that *starts* with a mutation.
+    ("Q-PERSIST-MUTATE", r"\b(?:update|delete)\b[^;]*?\bfrom\s*`|\b(?:insert|upsert)\s*\[|`[\w.]+\s+(?:insert|upsert|set)\b"),
+]
+
 
 @dataclass
 class QueryVerdict:
@@ -84,6 +118,15 @@ class QueryGuard:
         if "?[" in raw or "![" in raw:
             return QueryVerdict("reject", "q",
                                 reasons=["q functional form not analysable — failing closed"])
+
+        # Dangerous-builtin veto: reject OS/file/eval/handler constructs anywhere
+        # in the body, even inside a valid-looking select. `select system "rm -rf
+        # /data" from trade` is structurally a read on an allowlisted table, but
+        # executes shell — so the structural checks below are not enough.
+        for rule, pat in _DANGEROUS_Q:
+            if re.search(pat, low):
+                return QueryVerdict("reject", "q",
+                                    reasons=[f"dangerous q construct [{rule}] not permitted in a read query — failing closed"])
 
         # One statement only — block laundering several queries past us.
         # q overloads `;` as a list/arg separator, so only TOP-LEVEL `;`

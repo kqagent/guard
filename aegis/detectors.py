@@ -523,8 +523,44 @@ def detect_mcp_manifest(action: Action, policy: dict) -> list[Finding]:
 
 
 # Registry: pack name -> detector. Engine runs only enabled packs.
+def detect_kdb_guard(action: Action, policy: dict) -> list[Finding]:
+    """Gate-layer defense-in-depth for the q/kdb surface: flag OS/file/eval/
+    handler builtins (system, hopen, hdel, set/save, value/eval, .z.*, exit,
+    amend, mutations) in a kdb query. Scoped to query tools ONLY (configurable
+    `query_tools`) so the q-specific deny-list never false-positives on a Bash
+    `--get`/`set`/`system` token. The QueryGuard proxy is the ground-truth veto
+    on the DB-bound query; this is the independent gate-layer check for any tool
+    that carries q, and the audit finding."""
+    from .query_proxy import _DANGEROUS_Q  # single source of truth
+    cfg = policy.get("kdb_guard", {})
+    eff = _effect(cfg, "block")
+    tools = set(cfg.get("query_tools", ["run_query", "run_q", "qcmd", "query", "exec_q", "kdb_query"]))
+    if action.tool not in tools:
+        return []
+    q = ""
+    for key in ("query", "q", "code", "expr"):
+        v = action.tool_input.get(key)
+        if isinstance(v, str) and v:
+            q = v
+            break
+    if not q:
+        q = " ".join(str(v) for v in action.tool_input.values() if isinstance(v, str))
+    low = q.lower()
+    for rule, pat in _DANGEROUS_Q:
+        if re.search(pat, low):
+            return [Finding(
+                rule_id=f"KDB-{rule}", effect=eff, pack="kdb_guard",
+                reason=f"dangerous q/kdb construct ({rule}) in a query — OS/file/eval/handler access",
+                remediation="kdb agents may only run read queries on allowlisted tables; "
+                            "system/file/eval/connection builtins are denied.",
+                evidence=q.strip()[:80],
+            )]
+    return []
+
+
 DETECTORS = {
     "secrets": detect_secrets,
+    "kdb_guard": detect_kdb_guard,
     "exfiltration": detect_exfiltration,
     "pii_egress": detect_pii_egress,
     "destructive_ops": detect_destructive,

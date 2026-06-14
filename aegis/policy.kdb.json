@@ -12,6 +12,7 @@
   },
   "enabled_packs": [
     "secrets",
+    "kdb_guard",
     "exfiltration",
     "pii_egress",
     "destructive_ops",
@@ -19,6 +20,7 @@
     "resource_guard"
   ],
   "secrets": {"effect": "block"},
+  "kdb_guard": {"effect": "block", "query_tools": ["run_query", "run_q", "qcmd", "query", "exec_q", "kdb_query"]},
   "egress": {
     "effect": "block",
     "allowlist_hosts": ["localhost", "127.0.0.1"]
