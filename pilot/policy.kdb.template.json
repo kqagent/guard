@@ -1,0 +1,64 @@
+{
+  "version": 2,
+  "metadata": {
+    "authored_by": "REPLACE: your control function / 2nd line",
+    "description": "REPLACE: your kdb+ analyst-agent policy. Authored by the control function, signed, mounted read-only. Fill every REPLACE/EDIT marker with your real values, run `python -m aegis.policy_lint thisfile.json --strict` until clean, then sign with aegis/deploy/build_bundle.py.",
+    "surface": "REPLACE: e.g. equities-desk-analyst-agent"
+  },
+  "fail_mode": "closed",
+  "grants": {
+    "_comment": "Analyst surface ONLY. Do NOT add run_query here — free-form q is break-glass (see policy.breakglass.json / BREAK_GLASS.md).",
+    "tools": ["run_structured_query", "read_file"]
+  },
+  "enabled_packs": [
+    "secrets", "kdb_guard", "exfiltration", "pii_egress",
+    "destructive_ops", "prod_protection", "resource_guard"
+  ],
+  "secrets": {"effect": "block"},
+  "kdb_guard": {"effect": "block", "query_tools": ["run_structured_query", "run_query"]},
+  "egress": {"effect": "block", "allowlist_hosts": ["localhost", "127.0.0.1"]},
+  "pii_egress": {
+    "effect": "block",
+    "_comment": "EDIT: your classified-data vocabulary — column names / terms that must never leave.",
+    "sensitive_terms": ["positions", "pnl", "mnpi", "ssn", "account_no", "client_id", "iban", "swift", "salary"]
+  },
+  "destructive": {"effect": "block"},
+  "prod": {
+    "effect": "block",
+    "_comment": "EDIT: your production markers — prod hostnames, ports, mount paths.",
+    "patterns": ["(?i)\\bprod(uction)?\\b", ":2000\\b", "/mnt/prod"]
+  },
+  "protected_paths": ["aegis/policy.kdb.json", "aegis/engine.py", ".aegis/", "appconfig/passwords/"],
+  "resource_guard": {
+    "effect": "require_approval",
+    "_comment": "EDIT: your large partitioned tables.",
+    "big_tables": ["trade", "quote", "orders", "executions"]
+  },
+  "query_proxy": {
+    "_comment": "EDIT: this is the structured-query compiler's allowlist — the primary control. allowed_tables = the tables the agent may read; require_date_tables = the partitioned subset (a date range is REQUIRED on these); columns = the per-table column allowlist (EVERY allowed table should have one, or structured queries naming its columns fail closed); agg_fns = the aggregations you permit; max_rows = the hard row cap.",
+    "allowed_tables": ["trade", "quote"],
+    "require_date_tables": ["trade", "quote"],
+    "max_rows": 1000000,
+    "default_date": "REPLACE-OR-OMIT: e.g. 2024.01.02 if your intraday table lacks a date column",
+    "columns": {
+      "trade": ["date", "time", "sym", "price", "size", "side", "ex"],
+      "quote": ["date", "time", "sym", "bid", "ask", "bsize", "asize", "ex"]
+    },
+    "agg_fns": ["avg", "sum", "min", "max", "count", "first", "last", "wavg", "wsum", "dev", "var", "med", "countdistinct"]
+  },
+  "supervisor": {
+    "enabled": true,
+    "breaker_store": ".aegis/breakers.json",
+    "incident_dir": ".aegis/incidents",
+    "window_seconds": 300,
+    "enforce_in_monitor": false,
+    "overseer": {"enabled": false, "_comment": "set true (with an API key) for the advisory 2nd-line LLM narrative on incidents."},
+    "kill": {"strategy": "none"},
+    "tripwires": {
+      "critical_rules": {"rule_ids": ["PRD-PROTECTED-PATH", "PII-EGRESS", "SEC-PRIVATE-KEY-BLOCK", "KDB-Q-SYSTEM-EXEC"]},
+      "repeated_blocks": {"max_blocks": 3},
+      "escalation_rate": {"max_per_minute": 10},
+      "unknown_action": {"enabled": true, "known_tools": ["run_structured_query", "read_file"]}
+    }
+  }
+}
