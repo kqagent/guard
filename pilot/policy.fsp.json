@@ -1,0 +1,65 @@
+{
+  "version": 2,
+  "metadata": {
+    "authored_by": "control-function (pilot)",
+    "description": "Deployment-specific Aegis policy for the FSP (TorQ Finance Starter Pack) analyst-agent surface. Derived from aegis/policy.kdb.json (the shipped template) per PILOT.md Stage 1. The agent exposes two named tools (run_query/read_file) against a multi-stack FSP estate; this policy is what the gate enforces during the monitor-mode soak. default_date is pinned to a real HDB partition because the FSP intraday RDB has no date column (cols: time/sym/price/...), only the date-partitioned HDB does.",
+    "surface": "fsp-kdb-analyst-agent",
+    "estate": "fsp1..fsp4 (gateways 21007/22007/23007/24007)"
+  },
+  "fail_mode": "closed",
+  "grants": {
+    "_comment": "DEFAULT-DENY over the agent's NAMED tools. No shell, no binaries, no writable paths — this agent only queries and reads.",
+    "tools": ["run_query", "read_file"]
+  },
+  "enabled_packs": [
+    "secrets",
+    "exfiltration",
+    "pii_egress",
+    "destructive_ops",
+    "prod_protection",
+    "resource_guard"
+  ],
+  "secrets": {"effect": "block"},
+  "egress": {
+    "effect": "block",
+    "allowlist_hosts": ["localhost", "127.0.0.1"]
+  },
+  "pii_egress": {
+    "effect": "block",
+    "sensitive_terms": [
+      "positions", "position_book", "pnl", "mnpi", "ssn", "account_no",
+      "client_id", "iban", "swift", "card_number", "salary", "compensation"
+    ]
+  },
+  "destructive": {"effect": "block"},
+  "prod": {
+    "effect": "block",
+    "patterns": ["(?i)\\bprod(uction)?\\b", ":2000\\b", "/mnt/prod", "hdb/prod"]
+  },
+  "protected_paths": ["aegis/policy.kdb.json", "aegis/engine.py", ".aegis/", "appconfig/passwords/"],
+  "resource_guard": {
+    "effect": "require_approval",
+    "big_tables": ["trade", "trades", "quote", "quotes", "orders", "executions", "packets"]
+  },
+  "query_proxy": {
+    "allowed_tables": ["trade", "trades", "quote", "quotes", "orders", "executions"],
+    "require_date_tables": ["trade", "trades", "quote", "quotes", "orders", "executions"],
+    "max_rows": 1000000,
+    "default_date": "2015.01.08"
+  },
+  "supervisor": {
+    "enabled": true,
+    "breaker_store": ".aegis/breakers.json",
+    "incident_dir": ".aegis/incidents",
+    "window_seconds": 300,
+    "enforce_in_monitor": false,
+    "kill": {"strategy": "none"},
+    "tripwires": {
+      "critical_rules": {"rule_ids": ["PRD-PROTECTED-PATH", "PII-EGRESS", "SEC-PRIVATE-KEY-BLOCK", "DENY-PATH-NOT-WRITABLE"]},
+      "repeated_blocks": {"max_blocks": 3},
+      "escalation_rate": {"max_per_minute": 10},
+      "approval_abuse": {"max_approvals": 8},
+      "unknown_action": {"enabled": true}
+    }
+  }
+}
