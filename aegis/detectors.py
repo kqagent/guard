@@ -252,7 +252,13 @@ def detect_resource_guard(action: Action, policy: dict) -> list[Finding]:
             bounded = bool(re.search(r"(?i)\bwhere\b.*\bdate\b", stmt)
                            or re.search(r"(?i)\blimit\b", stmt)
                            or re.search(r"\bsublist\b", stmt)
-                           or re.search(r"^\s*\d+\s*#", stmt))
+                           or re.search(r"^\s*\d+\s*#", stmt)
+                           # Partition-enumeration metadata query: `select distinct date
+                           # from t` returns the (tiny, bounded) set of partitions, not
+                           # rows. Analysts run it constantly to discover coverage; it is
+                           # not an unbounded scan. Narrow on purpose — `select date ...`
+                           # (without distinct) still reads every row and stays flagged.
+                           or re.search(r"(?i)\bselect\s+distinct\s+date\b", stmt))
             if not bounded:
                 findings.append(Finding(
                     rule_id="RES-UNBOUNDED-SCAN", effect=eff, pack="resource_guard",

@@ -167,10 +167,21 @@ class QueryGuard:
                 out = out + f" where date={self.default_date}"
             injected.append(f"date={self.default_date}")
 
-        # Row cap via q's select[n] form, if no explicit cap present.
-        if re.match(r"\s*select\b", low) and not re.match(r"\s*select\s*\[", low):
-            out = re.sub(r"(?i)^(\s*)select\b", rf"\1select[{self.max_rows}]", out, count=1)
-            injected.append(f"row-cap={self.max_rows}")
+        # Row cap. We bound with a `where i<N` predicate rather than the
+        # `select[N]` virtual-index form: `select[N]` throws `nyi` on PARTITIONED
+        # kdb+ tables (the standard HDB layout), so it would make the proxy emit
+        # a query the database rejects — breaking the core guarantee that the DB
+        # only ever receives a *runnable* safe query. `where ... i<N` is
+        # partition-safe, caps rows, and composes with `by` grouping.
+        # (Verified against licensed kdb+ 4.1 on a real partitioned HDB.)
+        out_low = out.lower()
+        has_cap = bool(re.match(r"\s*select\s*\[", out_low)) or bool(re.search(r"\bi\s*<", out_low))
+        if re.match(r"\s*select\b", low) and not has_cap:
+            if re.search(r"(?i)\bwhere\b", out):
+                out = out + f", i<{self.max_rows}"
+            else:
+                out = out + f" where i<{self.max_rows}"
+            injected.append(f"row-cap=i<{self.max_rows}")
 
         if injected:
             return QueryVerdict("rewrite", "q", safe_query=out, tables=[table],
