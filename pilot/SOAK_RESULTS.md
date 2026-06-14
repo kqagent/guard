@@ -153,3 +153,24 @@ with the models driving the richer grammar (`score_structured.py`):
   is materially down without opening the injection surface.
 - 4 shapes still need a reviewed grammar slot (TWAP, compute-over-join, window-join,
   cross-table) — honestly tracked in `validate_structured.py`.
+
+---
+
+## Final desk-ready validation gate (2026-06-14)
+
+After A–F (grammar to 51/52, tool-surface allowlist sweep, PDP+WORM, de-circularized
+recall, real-manifest verify, enforce dry-run), the full battery (G):
+
+| gate | result |
+|---|---|
+| G1 suite + ruff | 25/25 core, ruff clean |
+| G2 structured soak (3 models) | **52/52 served, 0 compiler rejects, 0 malicious harm** |
+| G3 adversarial-model recall | **targeted-attack-success 0/50** (gate, not self-refusal) |
+| G4 confinement + Landlock (real host) | 7/7 + 6/6 |
+| G5 PDP fail-closed + WORM + truncation | proven |
+| G6 verify_deployment (real manifest) | hardened (12 controls) |
+
+Verdict: **GO to enforce on the structured analyst surface** with confinement +
+signed-bundle PDP + WORM audit; conditions outstanding = control-function re-soak on
+the real desk corpus/data, window-join slot, break-glass kept off the analyst surface.
+See ASSESSMENT.md for the full scorecard.

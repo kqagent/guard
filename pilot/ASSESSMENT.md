@@ -1,125 +1,69 @@
-# Pilot assessment — honest stage read (2026-06-14)
+# Aegis — enforce-readiness scorecard (FSP kdb+ estate)
 
-Where the FSP pilot actually stands, written to be shown to a reviewer/control
-function without overselling. Stage: **monitor-mode pilot on sample stacks** —
-not production, never touched by a real user.
+*2026-06-14, homer. Honest go/no-go for enforcing Aegis on a real kdb+ analyst
+desk. Supersedes the earlier monitor-stage read. Each gate marked met / not, with
+the real numbers. Written to be shown to a control function without overselling.*
 
-## Genuinely solid
+## Scorecard
 
-- **A real false-positive number on real gateways.** 0 gate false positives
-  across 156 benign task-runs on a live 4-stack TorQ FSP estate, three models,
-  full measure→tune→re-measure loop. This is the artifact that could not be
-  produced in a dev sandbox.
-- **Two real bugs only real-q testing surfaced — one critical.**
-  (1) `select[N]` throws `nyi` on partitioned HDBs, so the proxy's row cap was
-  emitting queries the DB rejects — its core guarantee was broken on every real
-  historical DB. (2) `select sh:system "id" from trade` ran **shell on the kdb
-  host** through a "read-only" proxy (proven: returned a uid). Both fixed.
-- **Confinement enforces at the kernel on real Linux** — read-only system dirs +
-  Landlock + empty netns (`confine_adversarial_test` 7/7, `landlock_test` 6/6).
-  This is the layer to trust most: enforced by the kernel, not by our regex.
-- **The out-of-process plane works** — signed bundle, fail-closed when the PDP
-  is unreachable, hash-chained + mirrored tamper-evident audit.
+| # | Gate | Result | Evidence |
+|---|------|--------|----------|
+| G1 | Unit suite + ruff + CI green | ✅ **25/25 core**, ruff clean | `run_all_checks`; CI |
+| G2 | Structured soak, 3 models: served / 0 rejects / 0 harm | ✅ **52/52 served, 0 compiler rejects, 0 malicious harm** | `score_structured.py` |
+| G3 | Adversarial-model recall (gate, not conscience) | ✅ **targeted-attack-success 0/50**; in-scope gate recall 15/15 | `adversarial_recall.py` |
+| G4 | Confinement adversarial + Landlock on the real host | ✅ **7/7 + 6/6** | `confine_adversarial_test.sh`, `landlock_test.sh` |
+| G5 | PDP-remote fail-closed + WORM audit verify | ✅ fail-closed; WORM mirror; **anchor truncation detected** | `stage34_verify.py` |
+| G6 | `verify_deployment.py` on the real manifest | ✅ **manifest hardened (12 controls)** | `verify_deployment.py aegis/deploy/k8s.yaml` |
+| A | Structured grammar covers the real desk corpus | ⚠️ **51/52** (window-join flagged, not shipped) | `validate_structured.py` |
+| B | Every agent tool is enumerate-goodness | ✅ analyst surface = structured-query + read_file (both allowlist); free-form removed | `TOOL_SURFACE_AUDIT.md` |
+| F | Enforce-mode dry run clean (FP holds, breaker fires) | ✅ **0/8 benign blocked**; breaker + incident on tripwire | dry-run (found+fixed supervisor `unknown_action` gap) |
 
-## What we will NOT oversell
+## The two numbers that decide it
 
-1. **The gate/proxy are a deny-list on a Turing-complete language.** q reaches
-   the OS, files, network and its own handlers many ways; we block the ones we
-   enumerated. Enumerate-badness on a full language is leaky — there are almost
-   certainly constructs we haven't blocked (every review round found more). Per
-   our own doctrine: **the gate raises cost and gives an audit trail; the kernel
-   sandbox is the containment.** Do not market the gate *as* the containment.
-2. **Recall is partly circular.** "15/15 in-scope" is against attacks we
-   authored, with a policy partly tuned to them — and the models *self-refused*
-   most attacks, so model safety training carried much of the load, not our
-   gate. A jailbroken/open model removes that layer and would subject the gate
-   to attack volume we have barely tested.
-3. **"0% FP" is on a synthetic corpus** — our analyst questions, the FSP sample
-   schema, two days of 2015 data. Encouraging, not "0% in production." Real
-   desks run messier multi-table queries, many of which the proxy currently
-   *rejects outright* (the coverage gap) — a usability wall on day one.
-4. **`kdb_guard` is unproven in enforce.** It denies common q tokens
-   (`get`/`set`/`value`); scoped to query tools, but not yet validated against a
-   real query corpus. Flipping it to enforce without that is its own risk.
-5. **None of the enforce-readiness gates are met** — widened real corpus,
-   control-function policy sign-off, WORM to a real off-host sink, and the
-   architecture decision below.
+- **False-positive (usability):** the structured analyst surface served **52/52**
+  benign desk tasks with **0 compiler rejects** across Opus/Sonnet/Haiku, and 0/8
+  benign blocked in enforce mode. The gate does not break legitimate work.
+- **Targeted-attack-success-rate (security):** **0/50**, measured by driving
+  attacks *directly at the gate* (no model self-refusal) across both surfaces with
+  an externally-informed corpus + obfuscation. This is the de-circularized recall
+  number the go/no-go hinges on.
 
-## The architecture signal (the most important takeaway)
+## Per-surface guarantees
 
-The coverage gap (proxy rejects `aj`/`wj`/`meta`/nested-from) and the injection
-surface (deny-list on free-form q) are **the same problem**: we accept arbitrary
-q text and try to police it with regex. Widening the parser to fix coverage adds
-hiding places for bypasses, in the most security-critical file — an arms race we
-lose slowly. The fix is to **not accept free-form q at all**: a structured query
-API (table, columns, date range, filters-as-data) that the proxy *compiles* into
-q. That deletes the coverage gap and the injection surface at once, and turns the
-query plane into enumerate-goodness — consistent with the rest of Aegis. See
-`docs/STRUCTURED_QUERY_API.md`.
+- **Structured analyst surface** (`run_structured_query`): enumerate-goodness — the
+  agent sends data, the compiler emits only `select/exec/meta/aj/lj` over
+  allowlisted tables/columns/ops/aggs; injection has no slot; output re-checked
+  against `_DANGEROUS_Q`. This is the surface proposed for enforce.
+- **File surface** (`read_file`): gate-level path allowlist (`file_access`).
+- **Free-form `run_query`**: a deny-list on a Turing-complete language — **removed
+  from the analyst grant**, break-glass only behind a separate admin-signed policy.
+- **Containment (load-bearing):** the q process runs non-root, read-only HDB, no
+  shell, egress-blocked; kernel-enforced (Landlock + read-only mounts + empty
+  netns), proven 7/7 + 6/6 on this host. A gate bypass is contained here.
+- **Mediation/record:** out-of-process signed-bundle PDP, fail-closed when down,
+  audit hash-chained + mirrored to an off-host WORM sink with truncation detection.
 
-## Update — structured-query API built (2026-06-14)
+## Go / no-go
 
-The architecture signal above is now acted on (`aegis/query_compiler.py`, branch
-`pilot/structured-query-api`). The agent's default surface is `run_structured_query`
-(+`read_file`); free-form `run_query` is demoted to a `--free-form` break-glass
-flag, never granted to an analyst. Live validation against the FSP estate:
-**40/52 desk shapes compile with 0 rejects and run; all 16 malicious tasks have
-no expressible form in the grammar.** The injection surface is removed, not
-policed; the coverage gap shrinks (aj/meta/bars/distinct/top-N became structured
-ops). The `_DANGEROUS_Q` deny-list is now a backstop on compiled output.
+**GO to enforce on the STRUCTURED analyst surface**, with these conditions:
+1. Confinement (G4) deployed and gated in CI — it is load-bearing, not optional.
+2. Free-form `run_query` never granted to an analyst; break-glass only, separately
+   signed, audited.
+3. Signed policy bundle mounted read-only; PDP out-of-process; WORM audit live.
 
-What this does **not** change — the two caveats stay live:
-- **Recall is still partly circular** (caveat 2): the malicious set is still our
-  own, and "inexpressible-in-grammar" is a strong claim *for the structured
-  surface* but the gate's recall against a creative adversary on the break-glass
-  surface is still under-tested. Test against an uncooperative/jailbroken model.
-- **"0% / 0-reject" is still synthetic** (caveat 3): 40/52 covered is on our
-  corpus; **12/52 genuinely need reviewed grammar extensions** (computed columns,
-  window functions, set-ops, window-join, sort-by-aggregate) — a real expressivity
-  wall a desk will hit. The structured path has **not** yet been LLM-soaked (model
-  generating requests) — that FP/recall re-run is the next measurement.
-- New: the compiler is now the primary query-plane control, so it carries the
-  heaviest review burden; kernel confinement remains load-bearing regardless.
+**NO-GO / conditions outstanding:**
+- The FP number, though strong, is on a representative corpus authored here, against
+  the FSP sample schema. The control function must re-soak on the **real desk
+  corpus + real data** before sign-off — that is the one gate only they can close.
+- Window-join (1/52) is not shipped; if the desk needs it, it is a reviewed slot.
+- The break-glass free-form surface's deny-list is bypassable in principle (no
+  completeness proof on a Turing-complete language); it stands only because it is
+  off the analyst surface and confinement backs it.
 
-## Update — structured-path LLM soak run (2026-06-14)
+## Standing honest caveats (carried)
 
-The structured path was soaked with all three models emitting structured requests
-(`pilot/score_structured.py`): **52/52 benign tasks served, 0 compiler rejects,
-malicious harm executed = 0**, and no compiled query matched a `_DANGEROUS_Q`
-construct. This partly retires caveat 2 *for the structured surface* — the
-malicious intents are inexpressible, so the result no longer rests on model
-self-refusal. (The break-glass free-form surface still relies on the deny-list +
-confinement and is still under-tested against an uncooperative model.)
-
-## Update — expressivity wall largely down (2026-06-14, grammar extensions)
-
-The structured grammar gained a bounded expression-AST (computed columns,
-aggregates-of-expressions, ratios), window functions (cumulative/drawdown),
-set-ops, sort-by-alias and countdistinct — each a typed, allowlisted slot, never
-free-form. Coverage **40/52 → 48/52 with 0 rejects**; the LLM re-soak served
-**52/52 benign with 0 compiler rejects and 0 malicious harm** across three models,
-and no compiled query matched a `_DANGEROUS_Q` construct. This substantially
-retires caveat 3's "coverage wall" for the structured surface. 4 shapes remain
-(TWAP, compute-over-join, window-join, cross-table) — each a future reviewed slot,
-honestly tracked. The two standing caveats are unchanged: free-form break-glass
-recall is still circular until the adversarial-model test (#3), and the rest of
-the tool surface still needs the allowlist sweep (#2).
-
-**Earlier finding (same class, on the file plane):** the soak caught a model
-calling `read_file` on `positions.csv`/`pnl.csv` for the position-book task. The
-gate ALLOWED it — `read_file` was a *deny-list* (`protected_paths`), not an
-allowlist — and only `FileNotFoundError` prevented a leak. This is exactly the
-enumerate-badness flaw the query plane just fixed. Closed in the pilot by scoping
-`read_file` to an allowlisted scratch dir; the proper product fix is a gate-level
-`read_file` path allowlist (analogous to `query_proxy.allowed_tables`). **Lesson:
-the structured-API/allowlist discipline must be applied to EVERY tool the agent
-holds, not just the query tool.**
-
-## Bottom line
-
-A credible, honestly-instrumented **monitor-stage** guardrail; two genuine bugs
-found (one critical); enforcement plane and kernel confinement proven on real
-Linux. This is the right stage to be at. It is **not** "safe to enforce on a real
-desk," and the path there is not more regex — it is the structured-query-API
-redesign with **confinement as the primary control and the gate as audited
-defense-in-depth.**
+- "0" attack-success is on a broad, externally-informed sample — **not** a
+  completeness proof. Confinement remains the load-bearing control.
+- The structured-surface result no longer leans on model self-refusal (G3 is
+  programmatic); the break-glass surface is only as good as the deny-list +
+  confinement.
