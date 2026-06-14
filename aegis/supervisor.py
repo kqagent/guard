@@ -306,7 +306,6 @@ class Supervisor:
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
-    import sys
     from pathlib import Path as _P
 
     ap = argparse.ArgumentParser(description="Aegis runtime supervisor — operator CLI")

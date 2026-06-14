@@ -45,5 +45,7 @@ aegis-supervisor = "aegis.supervisor:main"    # incident/breaker operator CLI (s
 packages = ["aegis"]
 
 [tool.ruff]
-select = ["F"]
 target-version = "py310"
+
+[tool.ruff.lint]
+select = ["F"]

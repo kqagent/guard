@@ -1,0 +1,62 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  acceptance:
+    name: acceptance suite (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install (signing + formal extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[signing,formal]"
+      - name: Acceptance suite (must be all-core-pass)
+        run: python -m aegis.run_all_checks
+      - name: Build + verify a signed bundle (tamper must fail closed)
+        run: python aegis/deploy/build_bundle.py ./bundle
+
+  confinement:
+    name: OS confinement (native Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure unprivileged user namespaces are enabled
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          sysctl kernel.unprivileged_userns_clone 2>/dev/null || true
+      - name: Adversarial confinement test (strategy A — genuine read-only rootfs)
+        run: bash aegis/deploy/confine_adversarial_test.sh
+
+  deploy-gate:
+    name: deployment hardening gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pyyaml
+      - name: k8s manifest must pass 12/12 confinement controls
+        run: python tools/verify_deployment.py aegis/deploy/k8s.yaml
+
+  lint:
+    name: ruff (pyflakes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install ruff
+      - run: ruff check aegis tools

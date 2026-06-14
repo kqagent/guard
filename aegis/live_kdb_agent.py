@@ -87,9 +87,9 @@ class KdbTools:
         if not self.q_bin:
             return f"(no q available) proxy-approved query: {safe}"
         script = f"{_SEED}\nres:{safe.replace('.z.d', '2026.06.12')};\n-1 .Q.s res;\nexit 0;"
-        # Run q on a script FILE, not stdin: a WSL-bridged q (q_wsl.cmd) and
-        # native q both accept `q <file> -q`, and a file avoids any stdin
-        # translation layer. Written with LF newlines for q.
+        # Run q on a script FILE, not stdin: native q accepts `q <file> -q`,
+        # and a file avoids any stdin translation layer. Written with LF
+        # newlines for q. (Q_BIN may point at a wrapper, e.g. q-over-SSH.)
         import os
         import tempfile
         fd, path = tempfile.mkstemp(suffix=".q")

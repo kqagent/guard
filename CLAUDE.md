@@ -44,5 +44,4 @@ works keyless; the live score needs ANTHROPIC_API_KEY (see aegis/AGENTDOJO.md).
 - Policy: `aegis/policy.json` (control-function-authored, signable)
 - Deployment hardening references: `aegis/deploy/` (k8s.yaml, Dockerfile,
   deployment-profile.json)
-- Sales/exec material: `docs/Aegis-Executive-Summary.md` (+ PDF), rebuilt via
-  `tools/build_aegis_brief.py`
+- Exec summary: `docs/Aegis-Executive-Summary.md`

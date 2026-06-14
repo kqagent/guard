@@ -322,7 +322,6 @@ class ForwardProxy:
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
-    import sys
     ap = argparse.ArgumentParser(description="Aegis egress forward proxy")
     ap.add_argument("--serve", action="store_true", help="run the forward proxy")
     ap.add_argument("--policy", default=None, help="policy bundle (egress_proxy block)")
