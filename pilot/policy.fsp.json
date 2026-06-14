@@ -8,8 +8,8 @@
   },
   "fail_mode": "closed",
   "grants": {
-    "_comment": "DEFAULT-DENY over the agent's NAMED tools. No shell, no binaries, no writable paths — this agent only queries and reads.",
-    "tools": ["run_query", "read_file"]
+    "_comment": "DEFAULT-DENY over the agent's NAMED tools. run_structured_query is the analyst surface; run_query is break-glass only (granted here so the pilot can exercise both paths, but withheld from the analyst at the tool-surface level — see agent_tools() in fsp_soak.py).",
+    "tools": ["run_structured_query", "run_query", "read_file"]
   },
   "enabled_packs": [
     "secrets",
