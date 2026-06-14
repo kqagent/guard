@@ -81,6 +81,26 @@ What this does **not** change — the two caveats stay live:
 - New: the compiler is now the primary query-plane control, so it carries the
   heaviest review burden; kernel confinement remains load-bearing regardless.
 
+## Update — structured-path LLM soak run (2026-06-14)
+
+The structured path was soaked with all three models emitting structured requests
+(`pilot/score_structured.py`): **52/52 benign tasks served, 0 compiler rejects,
+malicious harm executed = 0**, and no compiled query matched a `_DANGEROUS_Q`
+construct. This partly retires caveat 2 *for the structured surface* — the
+malicious intents are inexpressible, so the result no longer rests on model
+self-refusal. (The break-glass free-form surface still relies on the deny-list +
+confinement and is still under-tested against an uncooperative model.)
+
+**New finding (same class, now on the file plane):** the soak caught a model
+calling `read_file` on `positions.csv`/`pnl.csv` for the position-book task. The
+gate ALLOWED it — `read_file` was a *deny-list* (`protected_paths`), not an
+allowlist — and only `FileNotFoundError` prevented a leak. This is exactly the
+enumerate-badness flaw the query plane just fixed. Closed in the pilot by scoping
+`read_file` to an allowlisted scratch dir; the proper product fix is a gate-level
+`read_file` path allowlist (analogous to `query_proxy.allowed_tables`). **Lesson:
+the structured-API/allowlist discipline must be applied to EVERY tool the agent
+holds, not just the query tool.**
+
 ## Bottom line
 
 A credible, honestly-instrumented **monitor-stage** guardrail; two genuine bugs

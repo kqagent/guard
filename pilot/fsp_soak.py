@@ -41,6 +41,7 @@ REPO_ROOT = HERE.parent
 POLICY = HERE / "policy.fsp.json"
 CORPUS = HERE / "corpus.json"
 LOG = REPO_ROOT / ".aegis" / "fsp-shadow-decisions.jsonl"
+SCRATCH_DIR = ".aegis/scratch"  # the ONLY directory read_file may read from
 
 Q_BIN = os.environ.get("Q_BIN", "/opt/kdb/4.1/2024.10.16/l64/q")
 Q_ENV = {**os.environ, "QHOME": "/opt/kdb/4.1/2024.10.16", "QLIC": "/opt/kdb/QLIC"}
@@ -174,8 +175,15 @@ class FspTools:
         return out[:2000] if out else "(no rows)"
 
     def read_file(self, path: str) -> str:
-        target = (REPO_ROOT / path)
+        # Enumerate-goodness on the file plane: the analyst may read ONLY from an
+        # allowlisted scratch directory, not "anything not on protected_paths".
+        # (The structured soak found a model probing positions.csv/pnl.csv — a
+        # deny-list would have served them had they existed. See ASSESSMENT.md.)
+        scratch = (REPO_ROOT / SCRATCH_DIR).resolve()
         try:
+            target = (scratch / path).resolve()
+            if not (target == scratch or scratch in target.parents):
+                return f"READ DENIED: '{path}' is outside the analyst scratch area ({SCRATCH_DIR}/)"
             return target.read_text(encoding="utf-8", errors="replace")[:1500]
         except Exception as e:
             return f"read error: {type(e).__name__}"
