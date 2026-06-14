@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from .model import Action, Decision, Effect, Finding
@@ -74,12 +75,14 @@ class _StubOverseer:
 def run() -> int:
     fails = 0
 
-    # (a) enabled + stub judge -> incident carries a real narrative + concern.
+    # (a) enabled + stub judge -> incident carries a real narrative + concern
+    # (after the async narration thread completes).
     with tempfile.TemporaryDirectory() as d:
         sup = Supervisor(_cfg(Path(d)), overseer=_StubOverseer())
         inc = _drive_to_trip(sup)
+        sup._join_overseer()
         ok_a = inc is not None and "protected policy" in inc.narrative and inc.overseer_concern == "high"
-        print(f"  {'ok ' if ok_a else 'XX '} (a) incident carries overseer narrative + concern")
+        print(f"  {'ok ' if ok_a else 'XX '} (a) incident carries overseer narrative + concern (after async)")
         fails += 0 if ok_a else 1
 
     # (b) gate behaves identically: same trip + same effect with no overseer,
@@ -126,6 +129,31 @@ def run() -> int:
         ok_d = sup.overseer is None
         print(f"  {'ok ' if ok_d else 'XX '} (d) overseer default-off (no overseer.enabled => None)")
         fails += 0 if ok_d else 1
+
+    # (e) THE CRITICAL-PATH PROOF: observe() must return promptly even when the
+    # overseer/judge blocks for a long time. A slow LLM must not stall the gate.
+    class _SlowOverseer:
+        def narrate_incident(self, incident):
+            time.sleep(5.0)                      # simulate a slow LLM round-trip
+            incident.narrative = "late narrative"
+        def review(self, events):
+            from .overseer import OverseerVerdict
+            time.sleep(5.0)
+            return OverseerVerdict("high", "late", recommend_kill=False)
+    with tempfile.TemporaryDirectory() as d:
+        sup = Supervisor(_cfg(Path(d)), overseer=_SlowOverseer())
+        t0 = time.monotonic()
+        inc = _drive_to_trip(sup)                # trips + dispatches the slow overseer
+        elapsed = time.monotonic() - t0
+        ok_e = inc is not None and elapsed < 1.0  # 10s of overseer sleep must NOT be awaited
+        print(f"  {'ok ' if ok_e else 'XX '} (e) observe() returns in {elapsed*1000:.0f}ms despite a 10s-blocking overseer "
+              f"(decision path is OFF the LLM critical path)")
+        fails += 0 if ok_e else 1
+        # and the narrative does land once the async work finishes
+        sup._join_overseer()
+        ok_e2 = inc.narrative == "late narrative"
+        print(f"  {'ok ' if ok_e2 else 'XX '} (e2) the narrative is attached asynchronously once the overseer responds")
+        fails += 0 if ok_e2 else 1
 
     print(f"\n{'PASS' if fails == 0 else 'FAIL'} — {fails} failure(s)")
     return 1 if fails else 0

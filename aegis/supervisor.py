@@ -50,6 +50,7 @@ import json
 import os
 import signal
 import subprocess
+import threading
 import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -216,10 +217,17 @@ class Supervisor:
                     model=self.cfg["overseer"].get("model", "claude-haiku-4-5-20251001"))
             except Exception:
                 self.overseer = None  # overseer must never break the supervisor
+        self._overseer_threads: list[threading.Thread] = []
         # In-memory per-principal event window. (For a multi-process PDP this
         # would be a shared store; loopback single-process is the common case.)
         self._events: dict[str, list[dict]] = {}
         self._seq = 0
+
+    def _join_overseer(self, timeout: float = 10.0) -> None:
+        """Test/operator helper: wait for in-flight async narrations to finish.
+        Never called on the decision path."""
+        for t in list(self._overseer_threads):
+            t.join(timeout)
 
     # -- the breaker check the engine consults -----------------------------
 
@@ -272,20 +280,34 @@ class Supervisor:
         else:
             incident.kill_detail = "monitor mode: incident recorded, kill NOT executed"
 
-        # 2nd line (advisory): attach an overseer narrative + concern to the
-        # ALREADY-DECIDED incident. This happens after the breaker/kill above; it
-        # cannot change `active`, untrip the breaker, or alter any decision. Any
-        # failure is swallowed — the incident is still written without a narrative.
+        # Write the incident NOW, without a narrative. The decision path must never
+        # wait on the LLM overseer — write first, narrate later.
+        self._write_incident(incident)
+
+        # 2nd line (advisory), strictly OUT-OF-BAND: a daemon thread asks the
+        # overseer for a narrative + concern and RE-writes the incident when the
+        # model responds. This happens entirely off evaluate()'s critical path —
+        # observe() returns immediately. The overseer still cannot change `active`,
+        # untrip the breaker, or alter any decision (additive-only); now it also
+        # can't delay one. Failures are swallowed; the incident already exists.
         if self.overseer is not None:
+            self._dispatch_overseer(incident, list(win))
+        return incident
+
+    def _dispatch_overseer(self, incident: Incident, events: list[dict]) -> None:
+        def _work():
             try:
                 self.overseer.narrate_incident(incident)
-                verdict = self.overseer.review(list(win))
-                incident.overseer_concern = verdict.concern
+                incident.overseer_concern = self.overseer.review(events).concern
             except Exception as e:
                 incident.narrative = f"(overseer unavailable: {type(e).__name__})"
-
-        self._write_incident(incident)
-        return incident
+            try:
+                self._write_incident(incident)   # re-write with the narrative attached
+            except Exception:
+                pass
+        t = threading.Thread(target=_work, name=f"overseer-{incident.incident_id}", daemon=True)
+        self._overseer_threads.append(t)
+        t.start()
 
     # -- tripwires (deterministic) -----------------------------------------
 
