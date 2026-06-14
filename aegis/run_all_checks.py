@@ -37,6 +37,8 @@ CORE = [
     ("budget_test", "per-principal daily action/cost ceilings, fail-closed ledger"),
     ("sdk_test", "broker SDK: gate -> approve -> execute -> charge composition"),
     ("cedar_export", "authz subset exported as Cedar text (interop + analysis)"),
+    ("supervisor_test", "runtime supervisor: tripwires + circuit breaker + kill switch + incidents"),
+    ("overseer_test", "LLM overseer (2nd line): reads logs, advisory verdict + incident narrative"),
 ]
 OPTIONAL = [
     ("verify_kdb_bridge", "bridges this repo's tools/gate.js (needs Node)"),

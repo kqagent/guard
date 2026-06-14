@@ -39,6 +39,7 @@ aegis-checks = "aegis.run_all_checks:run"     # the acceptance suite
 aegis-monitor = "aegis.monitor:run"           # shadow-mode FP/recall metrics
 aegis-approve = "aegis.approvals:main"        # approver CLI for REQUIRE_APPROVAL tickets
 aegis-egress = "aegis.egress_proxy:main"      # egress forward proxy (aegis-egress --serve)
+aegis-supervisor = "aegis.supervisor:main"    # incident/breaker operator CLI (status/show/reset)
 
 [tool.setuptools]
 packages = ["aegis"]

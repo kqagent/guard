@@ -27,10 +27,21 @@ class Engine:
         audit: AuditLog | None = None,
         load_error: str | None = None,
         mode: str | None = None,
+        supervisor=None,
     ):
         self.policy = policy or {}
         self.audit = audit
         self.load_error = load_error
+        # Optional runtime supervisor (second line of defence + kill switch).
+        # If the policy enables it and none was injected, build the default
+        # deterministic supervisor. Engine still runs fine without one.
+        if supervisor is None and self.policy.get("supervisor", {}).get("enabled"):
+            try:
+                from .supervisor import Supervisor
+                supervisor = Supervisor(self.policy["supervisor"])
+            except Exception:
+                supervisor = None  # supervisor must never break the gate
+        self.supervisor = supervisor
         # "enforce" (default) blocks for real. "monitor" computes the verdict
         # and logs the would-be effect, but downgrades the ENFORCED effect to
         # ALLOW so nothing is blocked — for shadow rollout and measuring the
@@ -110,6 +121,27 @@ class Engine:
             self._audit(action, decision)
             return decision
 
+        # Circuit-breaker check. If the supervisor has tripped this principal
+        # (a prior behavioural incident), block every further action — the
+        # session is quarantined until an operator resets it. Like load_error,
+        # this is a safety stop, NOT downgraded in monitor mode.
+        if self.supervisor is not None:
+            try:
+                tripped = self.supervisor.is_tripped(action.principal or "unknown")
+            except Exception:
+                tripped = True  # supervisor unreadable -> fail closed
+            if tripped:
+                decision = Decision(
+                    effect=Effect.BLOCK,
+                    findings=[Finding(
+                        rule_id="SUPERVISOR-TRIPPED", effect=Effect.BLOCK, pack="supervisor",
+                        reason="circuit breaker tripped for this principal — session quarantined after an incident",
+                        remediation="An operator must review the incident and reset the breaker (aegis-supervisor reset <principal>).",
+                    )],
+                )
+                self._audit(action, decision)
+                return decision
+
         findings: list[Finding] = []
         for pack in self.policy.get("enabled_packs", []):
             detector = DETECTORS.get(pack)
@@ -159,6 +191,17 @@ class Engine:
                 reason="audit record could not be delivered to a required WORM sink, failing closed",
                 remediation="Restore the audit sink (or run with strict_sinks=False on dev surfaces).",
             )])
+
+        # Second line of defence: let the supervisor observe this decision in
+        # the context of recent behaviour. A tripwire here trips the breaker
+        # (quarantining the next action) and fires the kill switch. It never
+        # changes THIS decision — it acts on the pattern, not the single call —
+        # and must never break the gate.
+        if self.supervisor is not None:
+            try:
+                self.supervisor.observe(action, decision, mode=self.mode)
+            except Exception:
+                pass
         return decision
 
     # -- default-deny --------------------------------------------------------

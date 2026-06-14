@@ -8,3 +8,8 @@ dist/
 .aegis/
 *.audit.jsonl
 *.key
+# Built signed bundles contain a generated PRIVATE key — never commit them.
+bundle/
+*.KEEP-SECRET
+# Stray research/scratch artifacts.
+_*.txt

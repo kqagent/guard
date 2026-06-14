@@ -45,5 +45,20 @@
     "require_date_tables": ["trade", "trades", "quote", "quotes", "orders", "executions"],
     "max_rows": 1000000,
     "default_date": ".z.d"
+  },
+  "supervisor": {
+    "enabled": true,
+    "breaker_store": ".aegis/breakers.json",
+    "incident_dir": ".aegis/incidents",
+    "window_seconds": 300,
+    "enforce_in_monitor": false,
+    "kill": {"strategy": "none"},
+    "tripwires": {
+      "critical_rules": {"rule_ids": ["PRD-PROTECTED-PATH", "PII-EGRESS", "SEC-PRIVATE-KEY-BLOCK", "DENY-PATH-NOT-WRITABLE"]},
+      "repeated_blocks": {"max_blocks": 3},
+      "escalation_rate": {"max_per_minute": 10},
+      "approval_abuse": {"max_approvals": 8},
+      "unknown_action": {"enabled": true}
+    }
   }
 }
