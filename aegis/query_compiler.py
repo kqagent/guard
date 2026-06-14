@@ -54,7 +54,7 @@ _WIN_FNS = {"sums", "maxs", "mins", "prds", "deltas", "ratios", "reverse"}
 # Monadic aggregations usable inside an expression node (dyadic wavg/wsum stay in
 # the `aggs` field). `countdistinct` is a named convenience for `count distinct`.
 _EXPR_AGGS = {"avg", "sum", "min", "max", "count", "first", "last",
-              "dev", "var", "med", "countdistinct"}
+              "dev", "var", "med", "countdistinct", "wavg", "wsum"}
 _MAX_EXPR_DEPTH = 6  # bound recursion; a desk expression is never deeper
 _MAX_CLAUSE_ITEMS = 64  # cap select/agg/filter/by list lengths — a real desk
                         # query never has this many, and it stops a giant request
@@ -187,6 +187,11 @@ class QueryCompiler:
             return f"count distinct {self._expr(node['arg'], cols_allowed, depth + 1)}"
         if fn == "count" and node.get("arg") is None:
             return "count i"
+        if fn in ("wavg", "wsum"):                 # dyadic: `weight wavg arg`
+            w = node.get("weight")
+            if w is None:
+                self._reject(f"'{fn}' in an expression requires a 'weight' expr (e.g. TWAP weights deltas time)")
+            return f"({self._expr(w, cols_allowed, depth + 1)}) {fn} ({self._expr(node['arg'], cols_allowed, depth + 1)})"
         return f"{fn} {self._expr(node['arg'], cols_allowed, depth + 1)}"
 
     def _select_list(self, req: dict, cols_allowed: set):
@@ -388,24 +393,41 @@ class QueryCompiler:
     def _compile_join(self, join: dict) -> str:
         if not isinstance(join, dict):
             self._reject("join must be an object")
-        if join.get("type") != "asof":
-            self._reject(f"join type '{join.get('type')}' not supported (asof only)")
+        jtype = join.get("type")
+        if jtype not in ("asof", "left"):
+            self._reject(f"join type '{jtype}' not supported (asof|left)")
         on = join.get("on")
         if not isinstance(on, list) or not on or not all(isinstance(c, str) and _IDENT.match(c) for c in on):
-            self._reject("asof 'on' must be a list of column identifiers")
+            self._reject("join 'on' must be a list of column identifiers")
         left, right = join.get("left"), join.get("right")
         if not isinstance(left, dict) or not isinstance(right, dict):
-            self._reject("asof join requires 'left' and 'right' structured requests")
-        # validate the join keys against BOTH tables' column allowlists
-        for side in (left, right):
-            cols = self._cols_for(self._table(side.get("table")))
-            for c in on:
-                if c.lower() not in cols:
-                    self._reject(f"join key '{c}' not allowlisted on table '{side.get('table')}'")
+            self._reject("join requires 'left' and 'right' structured requests")
+        lcols = self._cols_for(self._table(left.get("table")))
+        rcols = self._cols_for(self._table(right.get("table")))
+        for c in on:                       # join keys must be allowlisted on BOTH tables
+            if c.lower() not in lcols or c.lower() not in rcols:
+                self._reject(f"join key '{c}' not allowlisted on both tables")
         lsel = self._compile_select(left)
         rsel = self._compile_select(right)
         keys = "".join("`" + c for c in on)
-        return f"aj[{keys}; {lsel}; {rsel}]"
+
+        if jtype == "left":
+            # cross-table comparison: (keyed select) lj (keyed select). Both sides
+            # must group by the join key(s) so q has a keyed table to join on.
+            for nm, side in (("left", left), ("right", right)):
+                by = [b.lower() for b in (side.get("by") or [])]
+                if not all(c.lower() in by for c in on):
+                    self._reject(f"left-join {nm} side must 'by' the join key(s) {on} (keyed table)")
+            return f"({lsel}) lj ({rsel})"
+
+        # asof (aj). Optionally compute over the join RESULT (cols = union of both
+        # tables' allowlists), e.g. effective spread = price-(bid+ask)%2.
+        inner = f"aj[{keys}; {lsel}; {rsel}]"
+        sel = join.get("select")
+        if sel:
+            sel_str, _ = self._select_list({"select": sel}, lcols | rcols)
+            return f"select {sel_str} from {inner}"
+        return inner
 
     # -- backstop ----------------------------------------------------------
 

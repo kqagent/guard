@@ -86,16 +86,26 @@ COVERED = {
     "B36": {"setop": "except",
             "left": T("trade", columns=["sym"], distinct=True, date=D),
             "right": T("quote", columns=["sym"], distinct=True, date=D)},
+
+    # ---- newly covered by TWAP / compute-over-join / cross-table grammar -----
+    "B20": T("trade", select=[{"as": "twap", "expr": {"agg": "wavg", "weight": {"win": "deltas", "arg": {"col": "time"}}, "arg": {"col": "price"}}}], date=D, filters=[{"col": "sym", "op": "=", "value": "AAPL"}]),
+    "B29": {"join": {"type": "asof", "on": ["sym", "time"],
+                     "left": T("trade", columns=["sym", "time", "price"], date=D, filters=[{"col": "sym", "op": "=", "value": "AAPL"}]),
+                     "right": T("quote", columns=["sym", "time", "bid", "ask"], date=D),
+                     "select": [{"as": "eff", "expr": {"op": "sub", "args": [{"col": "price"}, {"op": "div", "args": [{"op": "add", "args": [{"col": "bid"}, {"col": "ask"}]}, {"lit": 2}]}]}}]}},
+    "B37": {"join": {"type": "left", "on": ["sym"],
+                     "left": T("trade", aggs=[{"fn": "count", "as": "nt"}], by=["sym"], date=D),
+                     "right": T("quote", aggs=[{"fn": "count", "as": "nq"}], by=["sym"], date=D)}},
 }
 
 # Shapes that STILL need a deliberate, reviewed grammar extension (honest gap).
 # (The expression-AST/window/setop/sort-by-alias/countdistinct extensions closed
 # B10/B23/B36/B38/B39/B41/B42/B50; these four remain.)
 NEEDS_EXTENSION = {
-    "B20": "TWAP — time-delta-weighted average; needs a weighted-window op (wavg over deltas)",
-    "B29": "effective spread — compute on an as-of-JOIN result; needs select-over-join",
-    "B30": "window join (wj) — not yet in grammar (design: 'added when needed')",
-    "B37": "cross-table count comparison (trade vs quote per sym) — multi-result / union-join",
+    "B30": ("window join (wj) — grammar slot designed but NOT shipped: wj's safe q "
+            "construction (window matrix + sorted/`g#`-keyed right table) needs more "
+            "validation than this pass allows, and the gateway can't run aj/wj at "
+            "volume here (federated-HDB perf). Flagged per 'flag, don't ship risky'."),
 }
 
 
