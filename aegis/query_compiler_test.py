@@ -21,8 +21,8 @@ CONFIG = {
     "require_date_tables": ["trade", "quote"],
     "max_rows": 1_000_000,
     "columns": {
-        "trade": ["time", "sym", "price", "size", "stop", "cond", "ex", "side"],
-        "quote": ["time", "sym", "bid", "ask", "bsize", "asize", "mode", "ex", "src"],
+        "trade": ["date", "time", "sym", "price", "size", "stop", "cond", "ex", "side"],
+        "quote": ["date", "time", "sym", "bid", "ask", "bsize", "asize", "mode", "ex", "src"],
     },
     "agg_fns": ["avg", "sum", "min", "max", "count", "first", "last", "wavg", "dev", "var", "med"],
 }
@@ -85,6 +85,35 @@ CASES = [
     ("join key not allowlisted",
      {"join": {"type": "asof", "on": ["secret"],
                "left": {"table": "trade", "date": D}, "right": {"table": "quote", "date": D}}}, "REJECT"),
+
+    # ---- expression-AST grammar extensions: legit shapes ---------------------
+    ("computed column (ask-bid spread)",
+     {"table": "quote", "select": [{"as": "spread", "expr": {"op": "sub", "args": [{"col": "ask"}, {"col": "bid"}]}}], "date": D}, "spread:(ask-bid)"),
+    ("agg of computed expr (avg spread)",
+     {"table": "quote", "select": [{"as": "avgspread", "expr": {"agg": "avg", "arg": {"op": "sub", "args": [{"col": "ask"}, {"col": "bid"}]}}}], "by": ["sym"], "date": D}, "avgspread:avg (ask-bid)"),
+    ("ratio of aggregates (stop %)",
+     {"table": "trade", "select": [{"as": "p", "expr": {"op": "div", "args": [{"agg": "sum", "arg": {"col": "stop"}}, {"agg": "count"}]}}], "date": D}, "(sum stop%count i)"),
+    ("window function (cumulative sums)",
+     {"table": "trade", "select": [{"as": "cum", "expr": {"win": "sums", "arg": {"col": "size"}}}], "date": D}, "cum:sums size"),
+    ("window drawdown (price - maxs price)",
+     {"table": "trade", "select": [{"as": "dd", "expr": {"op": "sub", "args": [{"col": "price"}, {"win": "maxs", "arg": {"col": "price"}}]}}], "date": D}, "(price-maxs price)"),
+    ("countdistinct agg", {"table": "trade", "aggs": [{"fn": "countdistinct", "col": "sym", "as": "n"}], "by": ["date"], "date": D}, "count distinct sym"),
+    ("sort by computed aggregate alias (top-N notional)",
+     {"table": "trade", "select": [{"as": "notional", "expr": {"agg": "sum", "arg": {"op": "mul", "args": [{"col": "price"}, {"col": "size"}]}}}], "by": ["sym"], "date": D, "sort": {"col": "notional", "dir": "desc"}, "limit": 5}, "`notional xdesc"),
+    ("set difference (except)",
+     {"setop": "except", "left": {"table": "trade", "columns": ["sym"], "distinct": True, "date": D},
+      "right": {"table": "quote", "columns": ["sym"], "distinct": True, "date": D}}, ") except ("),
+
+    # ---- expression-AST: abuse MUST reject -----------------------------------
+    ("expr operator not allowlisted", {"table": "trade", "select": [{"as": "x", "expr": {"op": "system", "args": [{"col": "price"}, {"col": "size"}]}}], "date": D}, "REJECT"),
+    ("expr column not allowlisted", {"table": "trade", "select": [{"as": "x", "expr": {"col": "password"}}], "date": D}, "REJECT"),
+    ("expr window fn not allowlisted", {"table": "trade", "select": [{"as": "x", "expr": {"win": "value", "arg": {"col": "price"}}}], "date": D}, "REJECT"),
+    ("expr agg not allowlisted", {"table": "trade", "select": [{"as": "x", "expr": {"agg": "value", "arg": {"col": "price"}}}], "date": D}, "REJECT"),
+    ("expr literal injection (string)", {"table": "trade", "select": [{"as": "x", "expr": {"op": "add", "args": [{"col": "price"}, {"lit": "1;system\"id\""}]}}], "date": D}, "REJECT"),
+    ("select alias injection", {"table": "trade", "select": [{"as": "x:system\"id\"", "expr": {"col": "price"}}], "date": D}, "REJECT"),
+    ("expr node with two keys (ambiguous)", {"table": "trade", "select": [{"as": "x", "expr": {"col": "price", "op": "add"}}], "date": D}, "REJECT"),
+    ("setop not allowlisted", {"setop": "; system", "left": {"table": "trade", "columns": ["sym"], "date": D}, "right": {"table": "trade", "columns": ["sym"], "date": D}}, "REJECT"),
+    ("sort by unknown identifier", {"table": "trade", "columns": ["sym"], "date": D, "sort": {"col": "notreal", "dir": "asc"}}, "REJECT"),
 ]
 
 

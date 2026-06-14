@@ -74,22 +74,28 @@ COVERED = {
     "B49": T("trade", aggs=[{"fn": "count", "as": "n"}], bucket={"col": "time", "size": "00:30", "as": "bkt"}, date=D),
     "B51": T("quote", aggs=[{"fn": "avg", "col": "bsize", "as": "abid"}, {"fn": "avg", "col": "asize", "as": "aask"}], by=["sym"], date=D),
     "B52": T("trade", aggs=[{"fn": "sum", "col": "size", "as": "vol"}], date=DD),
+
+    # ---- newly covered by the expression-AST / window / setop grammar --------
+    "B10": T("quote", select=[{"as": "avgspread", "expr": {"agg": "avg", "arg": {"op": "sub", "args": [{"col": "ask"}, {"col": "bid"}]}}}], by=["sym"], date=D),
+    "B23": T("quote", select=[{"as": "avgspread", "expr": {"agg": "avg", "arg": {"op": "sub", "args": [{"col": "ask"}, {"col": "bid"}]}}}], by=["sym"], date=D),
+    "B38": T("trade", select=[{"as": "cumvol", "expr": {"win": "sums", "arg": {"col": "size"}}}], date=D, filters=[{"col": "sym", "op": "=", "value": "AAPL"}]),
+    "B39": T("trade", select=[{"as": "dd", "expr": {"op": "sub", "args": [{"col": "price"}, {"win": "maxs", "arg": {"col": "price"}}]}}], date=D, filters=[{"col": "sym", "op": "=", "value": "AAPL"}]),
+    "B41": T("trade", select=[{"as": "notional", "expr": {"agg": "sum", "arg": {"op": "mul", "args": [{"col": "price"}, {"col": "size"}]}}}], by=["sym"], date=D, sort={"col": "notional", "dir": "desc"}, limit=5),
+    "B42": T("trade", select=[{"as": "stoppct", "expr": {"op": "mul", "args": [{"lit": 100}, {"op": "div", "args": [{"agg": "sum", "arg": {"col": "stop"}}, {"agg": "count"}]}]}}], by=["sym"], date=D),
+    "B50": T("trade", aggs=[{"fn": "countdistinct", "col": "sym", "as": "nsym"}], by=["date"], date=DD),
+    "B36": {"setop": "except",
+            "left": T("trade", columns=["sym"], distinct=True, date=D),
+            "right": T("quote", columns=["sym"], distinct=True, date=D)},
 }
 
-# Shapes that genuinely need a deliberate, reviewed grammar EXTENSION (honest gap).
+# Shapes that STILL need a deliberate, reviewed grammar extension (honest gap).
+# (The expression-AST/window/setop/sort-by-alias/countdistinct extensions closed
+# B10/B23/B36/B38/B39/B41/B42/B50; these four remain.)
 NEEDS_EXTENSION = {
-    "B10": "computed column (ask-bid spread) — needs a derived-column grammar (allowlisted binary ops)",
-    "B20": "TWAP — time-delta-weighted average; needs window/time-weight op",
-    "B23": "computed column (ask-bid spread) — derived-column grammar",
-    "B29": "effective spread — arithmetic on joined cols; derived-column grammar",
+    "B20": "TWAP — time-delta-weighted average; needs a weighted-window op (wavg over deltas)",
+    "B29": "effective spread — compute on an as-of-JOIN result; needs select-over-join",
     "B30": "window join (wj) — not yet in grammar (design: 'added when needed')",
-    "B36": "set difference (symbols traded but not quoted) — set-op grammar",
-    "B37": "cross-table count comparison — multi-result request",
-    "B38": "running cumulative volume — window function (sums)",
-    "B39": "max drawdown — window function (maxs/running)",
-    "B41": "top-N by a COMPUTED agg (notional) — sort-by-aggregate",
-    "B42": "stop-flag percentage — ratio of two aggregates; derived-column grammar",
-    "B50": "distinct symbols per date — distinct within group",
+    "B37": "cross-table count comparison (trade vs quote per sym) — multi-result / union-join",
 }
 
 

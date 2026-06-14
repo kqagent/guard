@@ -46,6 +46,16 @@ _SCALAR_OPS = {"=", "<", ">", "<=", ">="}
 _FILTER_OPS = _SCALAR_OPS | {"in", "within", "like"}
 _DEFAULT_AGGS = {"avg", "sum", "min", "max", "count", "first", "last",
                  "wavg", "dev", "var", "med", "cor", "wsum"}
+# Allowlisted binary operators for the bounded expression AST -> q operators.
+_EXPR_OPS = {"add": "+", "sub": "-", "mul": "*", "div": "%"}
+# Allowlisted monadic running/window functions (each returns a column, bounded
+# by the same scan cap as the underlying select).
+_WIN_FNS = {"sums", "maxs", "mins", "prds", "deltas", "ratios", "reverse"}
+# Monadic aggregations usable inside an expression node (dyadic wavg/wsum stay in
+# the `aggs` field). `countdistinct` is a named convenience for `count distinct`.
+_EXPR_AGGS = {"avg", "sum", "min", "max", "count", "first", "last",
+              "dev", "var", "med", "countdistinct"}
+_MAX_EXPR_DEPTH = 6  # bound recursion; a desk expression is never deeper
 
 
 class StructuredQueryRejected(Exception):
@@ -77,6 +87,8 @@ class QueryCompiler:
             raise StructuredQueryRejected("request must be an object")
         if "join" in request:
             out = self._compile_join(request["join"])
+        elif "setop" in request:
+            out = self._compile_setop(request)
         else:
             out = self._compile_select(request)
         return self._backstop(out)
@@ -125,6 +137,66 @@ class QueryCompiler:
             self._reject(f"unsafe string value: {v!r}")
         self._reject(f"unsupported value type: {type(v).__name__}")
 
+    def _expr(self, node, cols_allowed: set, depth: int = 0) -> str:
+        """Compile a bounded expression-AST node to q. A node is exactly one of:
+        {col}, {lit}, {op,args:[expr,expr]}, {agg,arg?}, {win,arg}. Every leaf goes
+        through the column/scalar allowlist machinery; operators/aggs/windows are
+        allowlisted; there is no free-form string anywhere — so an expression can
+        compute (bid+ask)%2 or sums size but cannot name an un-vetted column or
+        inject a token."""
+        if depth > _MAX_EXPR_DEPTH:
+            self._reject("expression too deeply nested")
+        if not isinstance(node, dict):
+            self._reject(f"expression node must be an object, got {type(node).__name__}")
+        keys = {"col", "lit", "op", "agg", "win"} & set(node)
+        if len(keys) != 1:
+            self._reject(f"expression node must have exactly one of col/lit/op/agg/win: {node!r}")
+        if "col" in node:
+            return self._col(node["col"], cols_allowed)
+        if "lit" in node:
+            return self._scalar(node["lit"])
+        if "op" in node:
+            if node["op"] not in _EXPR_OPS:
+                self._reject(f"operator '{node['op']}' not allowed")
+            args = node.get("args")
+            if not isinstance(args, list) or len(args) != 2:
+                self._reject("op requires exactly 2 args")
+            a = self._expr(args[0], cols_allowed, depth + 1)
+            b = self._expr(args[1], cols_allowed, depth + 1)
+            return f"({a}{_EXPR_OPS[node['op']]}{b})"
+        if "win" in node:
+            if node["win"] not in _WIN_FNS:
+                self._reject(f"window function '{node['win']}' not allowed")
+            return f"{node['win']} {self._expr(node['arg'], cols_allowed, depth + 1)}"
+        # agg
+        fn = node["agg"]
+        if fn not in _EXPR_AGGS:
+            self._reject(f"aggregation '{fn}' not allowed in expression")
+        if fn == "countdistinct":
+            return f"count distinct {self._expr(node['arg'], cols_allowed, depth + 1)}"
+        if fn == "count" and node.get("arg") is None:
+            return "count i"
+        return f"{fn} {self._expr(node['arg'], cols_allowed, depth + 1)}"
+
+    def _select_list(self, req: dict, cols_allowed: set):
+        """Optional `select`: [{as, expr}] — named computed/aggregated expressions.
+        Returns (compiled_str_or_None, set_of_aliases)."""
+        sel = req.get("select")
+        if not sel:
+            return None, set()
+        if not isinstance(sel, list):
+            self._reject("select must be a list of {as, expr}")
+        parts, aliases = [], set()
+        for item in sel:
+            if not isinstance(item, dict) or "expr" not in item or "as" not in item:
+                self._reject("each select item needs 'as' and 'expr'")
+            alias = item["as"]
+            if not _IDENT.match(str(alias)):
+                self._reject(f"invalid select alias: {alias!r}")
+            parts.append(f"{alias}:{self._expr(item['expr'], cols_allowed)}")
+            aliases.add(str(alias).lower())
+        return ", ".join(parts), aliases
+
     # -- clause builders ---------------------------------------------------
 
     def _select_expr(self, req: dict, cols_allowed: set) -> str:
@@ -137,7 +209,7 @@ class QueryCompiler:
                 if not isinstance(a, dict):
                     self._reject("each agg must be an object")
                 fn = a.get("fn")
-                if fn not in self.agg_fns:
+                if fn not in self.agg_fns and fn != "countdistinct":
                     self._reject(f"aggregation '{fn}' not on the allowlist")
                 col = self._col(a["col"], cols_allowed) if a.get("col") is not None else None
                 weight = self._col(a["weight"], cols_allowed) if a.get("weight") is not None else None
@@ -145,6 +217,10 @@ class QueryCompiler:
                     if not (col and weight):
                         self._reject(f"'{fn}' requires both 'col' and 'weight' (e.g. size-weighted price)")
                     body = f"{weight} {fn} {col}"
+                elif fn == "countdistinct":
+                    if not col:
+                        self._reject("countdistinct requires 'col'")
+                    body = f"count distinct {col}"
                 elif fn == "count":
                     body = f"count {col}" if col else "count i"
                 else:                                   # monadic: `avg price`
@@ -241,12 +317,28 @@ class QueryCompiler:
 
     # -- top-level forms ---------------------------------------------------
 
+    def _alias_set(self, req: dict) -> set:
+        """Identifiers that exist in the RESULT (so sort may reference them):
+        aggs[].as, select[].as, bucket.as."""
+        out = set()
+        for a in req.get("aggs", []) or []:
+            if isinstance(a, dict) and a.get("as") and _IDENT.match(str(a["as"])):
+                out.add(str(a["as"]).lower())
+        for s in req.get("select", []) or []:
+            if isinstance(s, dict) and s.get("as") and _IDENT.match(str(s["as"])):
+                out.add(str(s["as"]).lower())
+        b = req.get("bucket")
+        if isinstance(b, dict) and b.get("as") and _IDENT.match(str(b["as"])):
+            out.add(str(b["as"]).lower())
+        return out
+
     def _compile_select(self, req: dict) -> str:
         table = self._table(req.get("table"))
         if req.get("op") == "meta":
             return f"meta {table}"
         cols_allowed = self._cols_for(table)
-        sel = self._select_expr(req, cols_allowed)
+        sel_list, _ = self._select_list(req, cols_allowed)
+        sel = sel_list if sel_list is not None else self._select_expr(req, cols_allowed)
         distinct = "distinct " if req.get("distinct") else ""
         by = self._by_expr(req, cols_allowed)
         where = self._where_expr(req, table, cols_allowed)
@@ -258,7 +350,12 @@ class QueryCompiler:
         if sort is not None:
             if not isinstance(sort, dict):
                 self._reject("sort must be an object {col,dir}")
-            scol = self._col(sort.get("col"), cols_allowed)
+            sname = sort.get("col")
+            aliases = self._alias_set(req)   # sort may target a computed result column
+            if not (isinstance(sname, str) and _IDENT.match(sname)
+                    and (sname.lower() in cols_allowed or sname.lower() in aliases)):
+                self._reject(f"sort column '{sname}' is neither an allowlisted column nor a result alias")
+            scol = sname
             direction = sort.get("dir", "asc")
             if direction not in ("asc", "desc"):
                 self._reject(f"sort dir must be asc/desc, got {direction!r}")
@@ -270,6 +367,15 @@ class QueryCompiler:
                 self._reject(f"invalid limit: {limit!r}")
             base = f"{min(limit, self.max_rows)} sublist {base if sort is not None else '(' + base + ')'}"
         return base
+
+    def _compile_setop(self, req: dict) -> str:
+        op = req.get("setop")
+        if op not in ("except", "union", "inter"):
+            self._reject(f"setop '{op}' not supported (except/union/inter)")
+        left, right = req.get("left"), req.get("right")
+        if not isinstance(left, dict) or not isinstance(right, dict):
+            self._reject("setop requires 'left' and 'right' structured requests")
+        return f"({self._compile_select(left)}) {op} ({self._compile_select(right)})"
 
     def _compile_join(self, join: dict) -> str:
         if not isinstance(join, dict):
