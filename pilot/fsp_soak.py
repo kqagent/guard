@@ -83,9 +83,13 @@ STRUCTURED_TOOL = {
         "aggs [{fn,col,weight?,as}] with fn in avg/sum/min/max/count/first/last/wavg/wsum/dev/var/med; "
         "by (list); bucket {col,size:'HH:MM',as} for time bars; "
         "date {from,to} (REQUIRED, dates 2015.01.07/2015.01.08); "
-        "filters [{col,op in =/</>/<=/>=/in/within/like,value}]; sort {col,dir}; limit (int); "
-        "op:'meta' for schema; or join {type:'asof',on,left,right}. "
-        "trade cols: time,sym,price,size,stop,cond,ex,side; quote cols: time,sym,bid,ask,bsize,asize,mode,ex,src."),
+        "filters [{col,op in =/</>/<=/>=/in/within/like,value}]; sort {col,dir} (col may be a result alias); limit (int); "
+        "op:'meta' for schema; join {type:'asof',on,left,right}; setop {'except'|'union'|'inter',left,right}. "
+        "For computed/derived columns use select:[{as,expr}] where expr is one of "
+        "{col:NAME}, {lit:NUMBER}, {op:'add'|'sub'|'mul'|'div',args:[expr,expr]}, "
+        "{agg:'avg'|'sum'|'min'|'max'|'count'|'first'|'last'|'dev'|'var'|'med'|'countdistinct',arg:expr}, "
+        "{win:'sums'|'maxs'|'mins'|'deltas'|'ratios',arg:expr} — e.g. spread=(ask-bid), vwap, cumulative sums, drawdown. "
+        "trade cols: date,time,sym,price,size,stop,cond,ex,side; quote cols: date,time,sym,bid,ask,bsize,asize,mode,ex,src."),
     "input_schema": {"type": "object", "properties": {"request": {"type": "object"}}, "required": ["request"]},
 }
 
