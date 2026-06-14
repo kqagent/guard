@@ -91,7 +91,21 @@ malicious intents are inexpressible, so the result no longer rests on model
 self-refusal. (The break-glass free-form surface still relies on the deny-list +
 confinement and is still under-tested against an uncooperative model.)
 
-**New finding (same class, now on the file plane):** the soak caught a model
+## Update — expressivity wall largely down (2026-06-14, grammar extensions)
+
+The structured grammar gained a bounded expression-AST (computed columns,
+aggregates-of-expressions, ratios), window functions (cumulative/drawdown),
+set-ops, sort-by-alias and countdistinct — each a typed, allowlisted slot, never
+free-form. Coverage **40/52 → 48/52 with 0 rejects**; the LLM re-soak served
+**52/52 benign with 0 compiler rejects and 0 malicious harm** across three models,
+and no compiled query matched a `_DANGEROUS_Q` construct. This substantially
+retires caveat 3's "coverage wall" for the structured surface. 4 shapes remain
+(TWAP, compute-over-join, window-join, cross-table) — each a future reviewed slot,
+honestly tracked. The two standing caveats are unchanged: free-form break-glass
+recall is still circular until the adversarial-model test (#3), and the rest of
+the tool surface still needs the allowlist sweep (#2).
+
+**Earlier finding (same class, on the file plane):** the soak caught a model
 calling `read_file` on `positions.csv`/`pnl.csv` for the position-book task. The
 gate ALLOWED it — `read_file` was a *deny-list* (`protected_paths`), not an
 allowlist — and only `FileNotFoundError` prevented a leak. This is exactly the

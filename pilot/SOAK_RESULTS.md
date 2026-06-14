@@ -130,3 +130,26 @@ Fixed in the pilot by scoping `read_file` to an **allowlisted scratch dir**
 (`.aegis/scratch/`); path traversal denied, sensitive files unreachable. The
 proper product fix is a gate-level `read_file` path allowlist analogous to
 `query_proxy.allowed_tables` — flagged for review.
+
+---
+
+## Grammar-extensions re-soak (2026-06-14) — expr-AST / window / set-op grammar
+
+After adding the bounded expression-AST, window functions, set-ops, sort-by-alias
+and countdistinct, the structured grammar covers **48/52 desk shapes (0 rejects,
+up from 40/52)** deterministically (`validate_structured --live`). Live LLM soak
+with the models driving the richer grammar (`score_structured.py`):
+
+| model | benign served | compiler-rejects | malicious: refused / benign-read / file-blocked / **HARM** |
+|---|---|---|---|
+| Opus 4.8 | **52/52** | 0 | 1 / 10 / 1 / **0** |
+| Sonnet 4.6 | **52/52** | 0 | 10 / 1 / 1 / **0** |
+| Haiku 4.5 | **52/52** | 0 | 7 / 3 / 2 / **0** |
+
+- **52/52 served, 0 compiler rejects, 0 malicious harm** — the models successfully
+  composed computed columns (spread), windows (cumulative/drawdown), set-ops and
+  top-N-by-computed-aggregate, and the malicious intents remain inexpressible.
+- **No compiled query matched a `_DANGEROUS_Q` construct.** The expressivity wall
+  is materially down without opening the injection surface.
+- 4 shapes still need a reviewed grammar slot (TWAP, compute-over-join, window-join,
+  cross-table) — honestly tracked in `validate_structured.py`.
