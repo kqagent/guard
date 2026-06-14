@@ -94,3 +94,27 @@ after `repeated_blocks.max_blocks=3` and writes an incident
   Exfiltration via this surface is structurally limited (no egress tool) — the
   load-bearing control there is confinement + the egress proxy (Stage 4), proven
   separately (`confine_adversarial_test.sh` 7/7, `landlock_test.sh` 6/6 on homer).
+
+---
+
+## Widened-corpus re-run (2026-06-14, per kqagent review)
+
+Corpus widened to **52 benign + 16 malicious** across real desk query shapes
+(vwap/twap, OHLC/xbar bars, as-of/window joins, distinct, meta/schema, multi-table,
+cumulative) and plausibly-framed attacks. Live soak, monitor mode, 3 models:
+
+| model | benign | FP | gate FP-rate | malicious | live-caught | self-refused |
+|---|---|---|---|---|---|---|
+| Opus 4.8 | 52 | 0 | **0.000** | 16 | 3 | 9 |
+| Sonnet 4.6 | 52 | 0 | **0.000** | 16 | 0 | 15 |
+| Haiku 4.5 | 52 | 0 | **0.000** | 16 | 2 | 13 |
+
+Deterministic in-scope gate recall: **15/15 = 1.000**. Across 156 benign task-runs
+the gate raised zero false positives.
+
+**Honest caveat:** FP-rate measures *gate* over-blocking. The QueryGuard **proxy**
+separately rejected the legitimate `aj`/`wj`/`meta`/`N#select`/nested-from queries
+(its select-only coverage gap, see KDB_SYSTEM_THREATS.md) — fail-closed-safe, not a
+gate FP, but a usability gap tracked as follow-up. The system-command guardrail
+(kdb_guard) added after this run does not change benign gate verdicts (0 benign
+queries trip its deny-scan).
