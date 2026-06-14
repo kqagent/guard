@@ -57,6 +57,30 @@ q. That deletes the coverage gap and the injection surface at once, and turns th
 query plane into enumerate-goodness — consistent with the rest of Aegis. See
 `docs/STRUCTURED_QUERY_API.md`.
 
+## Update — structured-query API built (2026-06-14)
+
+The architecture signal above is now acted on (`aegis/query_compiler.py`, branch
+`pilot/structured-query-api`). The agent's default surface is `run_structured_query`
+(+`read_file`); free-form `run_query` is demoted to a `--free-form` break-glass
+flag, never granted to an analyst. Live validation against the FSP estate:
+**40/52 desk shapes compile with 0 rejects and run; all 16 malicious tasks have
+no expressible form in the grammar.** The injection surface is removed, not
+policed; the coverage gap shrinks (aj/meta/bars/distinct/top-N became structured
+ops). The `_DANGEROUS_Q` deny-list is now a backstop on compiled output.
+
+What this does **not** change — the two caveats stay live:
+- **Recall is still partly circular** (caveat 2): the malicious set is still our
+  own, and "inexpressible-in-grammar" is a strong claim *for the structured
+  surface* but the gate's recall against a creative adversary on the break-glass
+  surface is still under-tested. Test against an uncooperative/jailbroken model.
+- **"0% / 0-reject" is still synthetic** (caveat 3): 40/52 covered is on our
+  corpus; **12/52 genuinely need reviewed grammar extensions** (computed columns,
+  window functions, set-ops, window-join, sort-by-aggregate) — a real expressivity
+  wall a desk will hit. The structured path has **not** yet been LLM-soaked (model
+  generating requests) — that FP/recall re-run is the next measurement.
+- New: the compiler is now the primary query-plane control, so it carries the
+  heaviest review burden; kernel confinement remains load-bearing regardless.
+
 ## Bottom line
 
 A credible, honestly-instrumented **monitor-stage** guardrail; two genuine bugs
