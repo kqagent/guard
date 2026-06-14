@@ -19,17 +19,29 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 keywords = ["llm", "agent", "guardrails", "security", "policy", "kdb", "claude", "anthropic"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Financial and Insurance Industry",
     "Topic :: Security",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
 ]
 dependencies = []  # core path is stdlib-only
+
+[project.urls]
+Repository = "https://github.com/kqagent/guard"
 
 [project.optional-dependencies]
 signing = ["cryptography>=42"]   # Ed25519 policy signing (HMAC-SHA256 fallback needs no deps)
 formal = ["z3-solver>=4.13"]     # SMT proofs over unbounded domains (aegis.formal_smt)
-benchmarks = ["agentdojo>=0.1", "anthropic"]  # official AgentDojo run (tools/run_agentdojo_official.py)
+agent = ["anthropic>=0.40"]      # LLM overseer + live kdb agent (advisory layers; core never imports it)
+benchmarks = ["agentdojo>=0.1", "anthropic>=0.40"]  # official AgentDojo run
+deploy = ["pyyaml>=6"]           # verify_deployment.py manifest parsing
+# Everything a maintainer/CI needs in one shot.
+dev = ["aegis-guardrails[signing,formal,deploy]", "ruff>=0.4"]
 
 [project.scripts]
 aegis-pdp = "aegis.pdp_service:main"          # run the out-of-process PDP sidecar
@@ -42,7 +54,15 @@ aegis-egress = "aegis.egress_proxy:main"      # egress forward proxy (aegis-egre
 aegis-supervisor = "aegis.supervisor:main"    # incident/breaker operator CLI (status/show/reset)
 
 [tool.setuptools]
-packages = ["aegis"]
+packages = ["aegis", "aegis.deploy"]
+
+[tool.setuptools.package-data]
+# Runtime data read via __file__ MUST ship in the wheel: the policy bundles
+# (Engine.load / from_policy), the Cedar export, and the reference deploy
+# artifacts (k8s.yaml / profile / confinement scripts). Without this a
+# `pip install` would crash on the first from_policy() call.
+aegis = ["policy.json", "policy.kdb.json", "policy.cedar", "*.md"]
+"aegis.deploy" = ["*.yaml", "*.json", "*.sh", "Dockerfile", "*.md"]
 
 [tool.ruff]
 target-version = "py310"

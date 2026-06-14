@@ -17,6 +17,19 @@ A clean `quickstart` run *is* the demo: it stands up the out-of-process PDP and
 proves it allows a benign action and blocks a destructive one. See `DEPLOY.md`
 for containers/k8s and `PILOT.md` for the monitor→enforce rollout.
 
+## Install
+
+```bash
+pip install aegis-guardrails              # core (stdlib-only enforcement path)
+pip install "aegis-guardrails[signing]"   # + Ed25519 policy signing (recommended)
+pip install "aegis-guardrails[agent]"     # + the LLM overseer / live agent (advisory)
+pip install "aegis-guardrails[dev]"       # signing + formal + deploy + ruff (maintainers)
+```
+The core install pulls **zero** third-party packages — the enforcement path is
+stdlib-only by design, so the gate can't fail open on a missing import.
+Console entry points: `aegis-pdp`, `aegis-sign`, `aegis-checks`, `aegis-monitor`,
+`aegis-approve`, `aegis-egress`, `aegis-supervisor`, `aegis-hook`.
+
 ## The one idea
 
 Anything in an LLM's prompt — instructions, warnings, "you MUST not…" — is
