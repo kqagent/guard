@@ -1,0 +1,59 @@
+{
+  "version": 2,
+  "metadata": {
+    "authored_by": "control-function (ADMIN BREAK-GLASS — separate signing authority)",
+    "description": "SEPARATE, admin-only break-glass policy. Grants free-form run_query to a named admin principal ONLY, never an analyst. This bundle is signed by a distinct key and must NEVER be the policy mounted for the analyst PDP. Every break-glass action is audited and tripwire-escalated to an incident by default. The deny-list (_DANGEROUS_Q) + kernel confinement remain the controls on this path; the structured surface is the analyst path. See pilot/BREAK_GLASS.md.",
+    "surface": "fsp-kdb-ADMIN-breakglass"
+  },
+  "fail_mode": "closed",
+  "grants": {
+    "_comment": "Break-glass grants free-form run_query (+structured+read). This grant must only ever exist in the admin bundle.",
+    "tools": ["run_query", "run_structured_query", "read_file"]
+  },
+  "enabled_packs": [
+    "rbac",
+    "kdb_guard",
+    "secrets",
+    "exfiltration",
+    "pii_egress",
+    "destructive_ops",
+    "prod_protection",
+    "resource_guard"
+  ],
+  "rbac": {
+    "default_deny": true,
+    "_comment": "Default-deny: only the named admin principal may use these tools; everyone else (incl. any analyst principal) is denied via the empty allow_tools. run_query is reachable ONLY here, by breakglass-admin.",
+    "principals": {
+      "breakglass-admin": {"allow_tools": ["run_query", "run_structured_query", "read_file"]},
+      "*": {"allow_tools": []}
+    }
+  },
+  "kdb_guard": {"effect": "block", "query_tools": ["run_query", "run_structured_query"]},
+  "secrets": {"effect": "block"},
+  "egress": {"effect": "block", "allowlist_hosts": ["localhost", "127.0.0.1"]},
+  "pii_egress": {"effect": "block", "sensitive_terms": ["positions", "pnl", "mnpi", "ssn", "account_no", "client_id", "salary"]},
+  "destructive": {"effect": "block"},
+  "prod": {"effect": "block", "patterns": ["(?i)\\bprod(uction)?\\b", ":2000\\b", "/mnt/prod"]},
+  "protected_paths": ["aegis/policy.kdb.json", "aegis/engine.py", ".aegis/", "appconfig/passwords/"],
+  "resource_guard": {"effect": "require_approval", "big_tables": ["trade", "quote", "orders", "executions"]},
+  "query_proxy": {
+    "allowed_tables": ["trade", "quote"],
+    "require_date_tables": ["trade", "quote"],
+    "max_rows": 1000000,
+    "default_date": "2015.01.08",
+    "columns": {"trade": ["date", "time", "sym", "price", "size", "stop", "cond", "ex", "side"], "quote": ["date", "time", "sym", "bid", "ask", "bsize", "asize", "mode", "ex", "src"]}
+  },
+  "supervisor": {
+    "enabled": true,
+    "breaker_store": ".aegis/bg-breakers.json",
+    "incident_dir": ".aegis/bg-incidents",
+    "window_seconds": 300,
+    "enforce_in_monitor": false,
+    "kill": {"strategy": "none"},
+    "tripwires": {
+      "critical_rules": {"rule_ids": ["BREAK-GLASS-USED", "PRD-PROTECTED-PATH", "PII-EGRESS", "KDB-Q-SYSTEM-EXEC"]},
+      "repeated_blocks": {"max_blocks": 3},
+      "unknown_action": {"enabled": true, "known_tools": ["run_query", "run_structured_query", "read_file"]}
+    }
+  }
+}
