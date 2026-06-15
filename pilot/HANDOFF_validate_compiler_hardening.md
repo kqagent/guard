@@ -1,11 +1,19 @@
 # Handoff: validate the compiler/confinement hardening on the real 4B-row estate
 
-**Branch:** `pilot/row-entitlements` (through commit `a68e3b7`)
+**Branch:** `pilot/row-entitlements` (code through `a68e3b7`; this brief `7c81731`)
 **Who:** you have the real partitioned kdb+ estate (4B rows, real desk corpus, the
 uncooperative jailbroken-Opus attacker harness). I (laptop) wrote and unit/real-q
 verified everything below on a tiny fixture HDB + WSL kdb+; what I cannot do is
 prove it at scale or against the real schema and real principals. That is the
 gate only you can close.
+
+**What changed since your "28/28, branch up for review" delivery.** I reviewed
+that branch, found two entitlement holes your delivery proof did not cover (see
+§1), fixed them, and built the three follow-ups you flagged as out-of-scope
+(q-conformance battery §2, schema-diff linter §3, seccomp §4). Suite is now
+**30/30 core**. The load-bearing properties you proved (mandatory
+AND-intersection vs an agent filter, injection-safe values, principal from PDP)
+still hold — this brief asks you to extend the proof to the cases they didn't.
 
 Pull the branch and run the suite first:
 
@@ -22,26 +30,40 @@ and `seccomp_test`'s kernel half. Report the full output.
 
 ## 1. Entitlement combine-semantics change — THE blocker for merge to main
 
-I changed `_entitlement_preds` so a `*` baseline and a table-specific row_filter
-are now **BOTH applied (ANDed)**, not replace-one-with-the-other, and gated
-`meta` under default-deny. This is **stricter** than before — it can NARROW what
-an existing pilot principal sees if any principal was (knowingly or not) relying
-on the old replace behaviour where a table rule dropped the `*` baseline.
+Two holes your delivery proof did not exercise, both now fixed in
+`_entitlement_preds`/`_entitlement_gate`:
 
-**Validate against the real principals + real data:**
+**(a) `*`-baseline-vs-table-rule WIDENING.** Your proof showed an agent asking
+for a non-entitled symbol gets the intersection (empty) — correct, and still
+true. But that is the *agent-filter* path. The hole was a *cross-rule* path: a
+principal with BOTH a `*` baseline (e.g. `region in EMEA`) AND a table-specific
+rule (e.g. `trade -> sym in AAPL MSFT`). The table rule was **replacing** the
+`*` baseline, so the compiled trade query carried only `sym in AAPL MSFT` — the
+`region in EMEA` fence silently dropped. Fix: both are now ANDed (narrowest,
+fail-safe).
+
+> Re-prove THIS case, not the agent-filter case you already passed. Configure a
+> principal with a `*` fence + a table-specific filter, compile a query for the
+> table that has the specific rule, and confirm the emitted q carries BOTH
+> predicates and the rows returned satisfy BOTH. The old test (agent asks for a
+> symbol outside its set -> 0 rows) does NOT cover this and will look green
+> either way.
+
+**(b) `meta` bypassed default-deny.** `op:'meta'` returned `meta <table>` before
+any entitlement check, so an un-entitled principal could enumerate a table's
+schema. Fix: `meta` is now gated. Confirm `op:'meta'` by an un-entitled
+principal is REJECTED.
+
+**Then the regression sweep (the change is stricter -> can over-restrict):**
 - For every pilot principal, run their representative queries through the gate
-  and confirm the rows returned equal their intended entitled set — specifically
-  that no principal is now **over-restricted** (missing rows they should see) and
-  none is **under-restricted** (rows they shouldn't). Diff against the
-  pre-change behaviour if you still have it.
-- Confirm `op:'meta'` for an **un-entitled** principal is now REJECTED (was
-  returning the schema).
-- Confirm a principal with both a `*` region fence and a table-specific sym
-  filter gets BOTH predicates in the compiled q (region AND sym).
+  and confirm rows returned equal their intended entitled set — no principal now
+  **over-restricted** (missing rows they should see) nor **under-restricted**.
+  Diff against the pre-change behaviour if you still have it.
 
 If any pilot principal narrows unexpectedly, that is a policy-authoring decision,
 not a bug — flag it so the control function re-confirms the intended set before
-we merge. **Do not merge to main until this is signed off on real data.**
+we merge. **Do not merge to main until the combine case is signed off on real
+data.**
 
 ## 2. q-semantics conformance battery — reconfirm at scale
 
