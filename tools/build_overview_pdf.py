@@ -150,7 +150,7 @@ def main() -> int:
               P("Guardrails an LLM agent cannot ignore", "Sub"), Spacer(1, 4 * mm),
               P("A deterministic, fail-closed policy gate for deploying LLM agents on "
                 "production kdb+/q estates", "Sub"), Spacer(1, 30 * mm),
-              P("Honest technical overview &mdash; engineering complete on the structured kdb+ "
+              P("Honest technical overview - engineering complete on the structured kdb+ "
                 "analyst surface; remaining gates are human (real-data re-soak, design partner, "
                 "third-party audit).", "Foot"),
               P("Working name. MIT licensed. Not a security guarantee or legal advice.", "Foot"),
@@ -158,18 +158,18 @@ def main() -> int:
 
     story += [P("1 &nbsp; Problem statement", "H"),
               P("Banks and trading firms want LLM agents working <b>on and around production kdb+ "
-                "systems</b> &mdash; tickerplants, real-time and historical databases, gateways. The "
+                "systems</b> - tickerplants, real-time and historical databases, gateways. The "
                 "value is real; so is the danger:"),
               bullets([
                   "q is a full programming language reached through the <b>same channel as a query</b>. "
                   "One string can run shell, delete the HDB, kill the tickerplant (a market-data outage "
-                  "&mdash; a regulatory event), overwrite the sym file (silently corrupting every symbol "
+                  "- a regulatory event), overwrite the sym file (silently corrupting every symbol "
                   "column), open connections, or exfiltrate client positions and P&amp;L.",
-                  "An LLM is non-deterministic and <b>promptable by its own inputs</b> &mdash; a "
+                  "An LLM is non-deterministic and <b>promptable by its own inputs</b> - a "
                   "prompt-injection in a tool result can make a well-aligned model act.",
               ]),
               P("<b>Why the obvious defenses fail.</b> Anything in the model&rsquo;s prompt "
-                "(&ldquo;you must not delete data&rdquo;) is <i>advice</i> &mdash; attended to "
+                "(&ldquo;you must not delete data&rdquo;) is <i>advice</i> - attended to "
                 "probabilistically and ignored some fraction of the time. Classifier / LLM-judge "
                 "guardrails have been empirically evaded up to 100%. The field&rsquo;s conclusion: "
                 "<b>never rely on the model for security-critical decisions.</b>")]
@@ -181,23 +181,23 @@ def main() -> int:
               bullets([
                   "<b>Out-of-model, out-of-process.</b> The decision point runs where the agent "
                   "can&rsquo;t tamper with it; the model&rsquo;s output is an <i>input</i>, never trusted.",
-                  "<b>Default-deny &mdash; enumerate goodness, not badness.</b> Only granted capabilities "
+                  "<b>Default-deny - enumerate goodness, not badness.</b> Only granted capabilities "
                   "are allowed; blocking &ldquo;bad&rdquo; patterns on a Turing-complete language is a "
                   "losing arms race.",
                   "<b>Fail-closed.</b> Missing/forged policy, unreachable PDP, unknown tool, any error "
                   "&rarr; block.",
                   "<b>The query plane is bounded by construction.</b> The agent <b>never sends raw q</b> "
-                  "&mdash; it sends a <i>structured request</i> that Aegis <b>compiles</b> into bounded, "
+                  "- it sends a <i>structured request</i> that Aegis <b>compiles</b> into bounded, "
                   "allowlisted q. Dangerous operations have <b>no slot in the grammar</b>: structurally "
                   "impossible, not merely detected.",
                   "<b>Confinement is load-bearing; the gate is defense-in-depth.</b> The kdb+ process runs "
-                  "non-root, read-only HDB, no shell, no egress &mdash; so even a gate bypass cannot "
+                  "non-root, read-only HDB, no shell, no egress - so even a gate bypass cannot "
                   "destroy data or reach the network.",
               ])]
 
     story += [P("3 &nbsp; What it is tested to stop", "H"),
-              P("The adversarial corpus &mdash; driven by an <i>uncooperative</i> model told to actually "
-                "try &mdash; covers, on the kdb+ analyst surface:")]
+              P("The adversarial corpus - driven by an <i>uncooperative</i> model told to actually "
+                "try - covers, on the kdb+ analyst surface:")]
     stops = ["Running OS / shell commands on the kdb+ host",
              "Destroying or corrupting data on disk (HDB partitions, the sym file)",
              "Mutating the live data (delete / insert / update)",
@@ -232,14 +232,43 @@ def main() -> int:
                            ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]))
     story += [t]
 
-    story += [PageBreak(), P("5 &nbsp; How it works (request lifecycle)", "H"),
+    story += [PageBreak(), P("5 &nbsp; Customising it to your estate", "H"),
+              P("The policy is <b>data</b>, owned by the control function - not code. Adapting Aegis to a "
+                "specific desk or system is editing a signed JSON policy and running a validator: "
+                "<b>no engineering, no rebuild of the engine.</b>"),
+              bullets([
+                  "<b>Schema, tables &amp; columns.</b> The structured-query allowlist - allowed tables, "
+                  "per-table columns, required-date tables, row caps, permitted aggregations/operators - is "
+                  "declared in the policy. Add a table or column the desk needs, or remove one that is "
+                  "off-limits, by editing the allowlist; the validator (<font face=\"Courier\">aegis."
+                  "policy_lint</font>) checks it is well-formed before signing.",
+                  "<b>Rules &amp; threat packs.</b> Each pack (secrets, PII terms, destructive ops, prod "
+                  "markers, resource limits, MCP manifests, per-tool argument rules) is enabled and tuned in "
+                  "the policy - turn a pack on or off, add a sensitive term, a prod host/port pattern, a "
+                  "protected path. New deterministic rules ship as packs without touching the gate.",
+                  "<b>Tool surface &amp; principals.</b> Which named tools an agent (or a specific principal) "
+                  "may use is a grant list, with RBAC scoping per principal; the free-form/break-glass surface "
+                  "is a separate, separately-signed policy.",
+                  "<b>Supervisor &amp; kill action.</b> Behavioural tripwires (which rules are critical, the "
+                  "block/escalation thresholds) and the kill action (signal / docker kill / kubectl delete / "
+                  "callback) are policy-configured.",
+                  "<b>Confinement &amp; deployment.</b> The hardening profile (read-only mounts, dropped caps, "
+                  "egress allowlist, resource limits) is declarative and CI-checked against your real manifest.",
+              ]),
+              P("<b>The change workflow:</b> author from the template, run the validator until clean, sign it "
+                "(Ed25519), mount it read-only. Changing a rule = edit, re-validate, re-sign, reload the PDP - "
+                "<b>no code change, fully audited.</b> A turnkey authoring kit "
+                "(<font face=\"Courier\">policy.kdb.template.json</font> + the validator + a guide) lets the "
+                "control function do all of this - and run the real-data re-soak - themselves.")]
+
+    story += [PageBreak(), P("6 &nbsp; How it works (request lifecycle)", "H"),
               ListFlowable([ListItem(Paragraph(x, s["Bull"]), leftIndent=10) for x in [
-                  "The agent emits a tool call &mdash; on the analyst surface, a <b>structured query "
+                  "The agent emits a tool call - on the analyst surface, a <b>structured query "
                   "request</b> (data, not q text).",
                   "The PDP checks the <b>circuit breaker</b> (is this principal quarantined?), then "
                   "<b>default-deny grants</b> (is the tool / table / column even allowed?).",
                   "The <b>query compiler</b> validates every field against allowlists and emits "
-                  "<b>bounded q</b> &mdash; a date filter is required on partitioned tables, the result is "
+                  "<b>bounded q</b> - a date filter is required on partitioned tables, the result is "
                   "capped, and the compiled output is re-checked against a dangerous-construct backstop. "
                   "Any off-allowlist field &rarr; reject.",
                   "<b>Detector packs</b> and the <b>egress proxy</b> veto anything that passes.",
@@ -248,19 +277,19 @@ def main() -> int:
                   "The <b>supervisor</b> watches the decision <i>sequence</i>; behavioural tripwires trip a "
                   "<b>circuit breaker</b> that quarantines the principal and fires a <b>kill switch</b>. The "
                   "<b>LLM overseer</b> narrates the incident out-of-band (advisory; never delays a decision).",
-                  "Only an allow reaches the real kdb+ gateway &mdash; and even then the agent runs inside "
+                  "Only an allow reaches the real kdb+ gateway - and even then the agent runs inside "
                   "<b>OS confinement</b> that physically prevents shell, file destruction, and egress.",
               ]], bulletType="1", leftIndent=14)]
 
-    story += [P("6 &nbsp; How we tested it", "H"),
-              P("Validated by deterministic, runnable proofs &mdash; not assertions."),
+    story += [P("7 &nbsp; How we tested it", "H"),
+              P("Validated by deterministic, runnable proofs - not assertions."),
               bullets([
-                  "<b>Acceptance suite (CI-gated):</b> 27 core batteries on Python 3.10&ndash;3.12, a wheel "
-                  "fresh-install smoke test, the deployment-hardening gate, and ruff &mdash; every push.",
+                  "<b>Acceptance suite (CI-gated):</b> 27 core batteries on Python 3.10-3.12, a wheel "
+                  "fresh-install smoke test, the deployment-hardening gate, and ruff - every push.",
                   "<b>Formal:</b> the default-deny grant algebra proved sound &amp; monotonic by exhaustion "
                   "and by <b>Z3/SMT over unbounded domains</b> (24 theorems).",
                   "<b>OS confinement on real Linux:</b> adversarial test 7/7 + Landlock filesystem test 6/6 "
-                  "&mdash; kernel-enforced, fail-closed.",
+                  "- kernel-enforced, fail-closed.",
                   "<b>Production-scale realism soak (headline evidence)</b> on ~<b>4 billion rows</b> "
                   "(4 FSP HDBs, 500M trade + 500M quote each, partitioned, 166 GB): <b>no hints</b> (schema "
                   "discovered via meta); an <b>uncooperative attacker</b> (0 refused) &rarr; <b>0/30 attacks "
@@ -268,33 +297,33 @@ def main() -> int:
                   "(served-<i>and-correct</i>). Every benign miss was the model writing the wrong query, "
                   "never the guardrail.",
                   "<b>The process found &amp; fixed two real defects</b> in the primary control (a row cap "
-                  "that corrupted aggregations at scale; a follow-on materialization regression) &mdash; "
+                  "that corrupted aggregations at scale; a follow-on materialization regression) - "
                   "exactly what scale + ground-truth checking exist to catch.",
               ])]
 
-    story += [PageBreak(), P("7 &nbsp; Honest limitations &mdash; what Aegis is <i>not</i>", "H"),
+    story += [PageBreak(), P("8 &nbsp; Honest limitations - what Aegis is <i>not</i>", "H"),
               bullets([
                   "It governs the agent&rsquo;s <b>actions</b>. It does not make the model truthful, "
                   "doesn&rsquo;t stop it <i>suggesting</i> something unwise in text, and does not replace "
-                  "IAM / DLP / change-control &mdash; it composes with them.",
+                  "IAM / DLP / change-control - it composes with them.",
                   "<b>The gate is not the containment.</b> A denylist over a Turing-complete language is "
                   "leaky; the kernel confinement is what actually contains a determined agent.",
                   "A namespace/Landlock sandbox is <b>weaker than a microVM</b> against a kernel-level "
                   "attacker. For adversarial multi-tenant, run the same policy inside a microVM "
-                  "(Firecracker/Kata) &mdash; documented, not yet deployed.",
+                  "(Firecracker/Kata) - documented, not yet deployed.",
                   "The reported numbers are on a <b>representative</b> corpus and a <b>synthetic</b> "
                   "(if realistic-scale) schema. They prove the design; they are <b>not</b> a production "
                   "number. The control function must re-soak on the <b>real desk corpus and real data</b> "
-                  "before enforcing &mdash; the one gate only they can close.",
+                  "before enforcing - the one gate only they can close.",
                   "The free-form (raw-q) surface exists only as <b>admin-only break-glass</b>, separately "
                   "signed, never granted to an analyst; it is honestly weaker than the structured surface.",
               ])]
 
-    story += [P("8 &nbsp; Status &amp; what remains", "H"),
-              P("<b>Engineering: complete and validated</b> on the structured kdb+ analyst surface &mdash; "
+    story += [P("9 &nbsp; Status &amp; what remains", "H"),
+              P("<b>Engineering: complete and validated</b> on the structured kdb+ analyst surface - "
                 "bounded-by-construction query plane, kernel confinement, two-tier oversight + kill switch, "
                 "signed out-of-process PDP, tamper-evident WORM audit, installable package, CI-gated at 27/27."),
-              P("<b>Remaining &mdash; the human gates (not code):</b>"),
+              P("<b>Remaining - the human gates (not code):</b>"),
               bullets([
                   "Control-function <b>real-data re-soak</b> (the authoring kit makes this turnkey).",
                   "A <b>design partner</b> running it in monitor mode on production traffic.",
