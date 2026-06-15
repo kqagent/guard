@@ -1,3 +1,9 @@
 # Shell scripts must stay LF even on Windows checkouts — they run under bash
 # (Linux/WSL) and CRLF breaks the shebang and re-exec.
 *.sh text eol=lf
+
+# Binary assets must NOT get line-ending conversion (it corrupts them).
+*.pdf binary
+*.zip binary
+*.png binary
+*.jpg binary
