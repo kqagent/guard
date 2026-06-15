@@ -94,9 +94,9 @@ class Diagram(Flowable):
         cx = 12
         # confinement wrapper (load-bearing)
         self._box(4, 150, colw + 18, 272, [], bg=CONFBG, ed=LOAD, edw=1.2, dashed=True)
-        self.canv.setFont("Helvetica-Bold", 6.8)
+        self.canv.setFont("Helvetica-Bold", 6.4)
         self.canv.setFillColor(LOAD)
-        self.canv.drawString(10, 426, "OS CONFINEMENT (load-bearing): non-root / read-only HDB / no shell / no egress")
+        self.canv.drawString(10, 426, "OS CONFINEMENT (load-bearing): non-root / read-only HDB / no shell / no egress / namespaces+Landlock+seccomp")
         # agent
         self._box(cx, 382, colw, 30, ["LLM Agent - any model (Claude / GPT / Bedrock / local)"], fs=9)
         self._arrow(cx + colw / 2, 382, cx + colw / 2, 360, "tool call: STRUCTURED request (never raw q)")
@@ -106,8 +106,8 @@ class Diagram(Flowable):
         self.canv.setFillColor(ACCENT)
         self.canv.drawCentredString(cx + colw / 2, 342, "Policy Decision Point - out-of-process / signed / FAIL-CLOSED")
         sw = (colw - 32) / 3
-        self._box(cx + 8, 252, sw, 78, ["Query Compiler", "structured ->", "bounded,", "allowlisted q"], fs=7.5)
-        self._box(cx + 12 + sw, 252, sw, 78, ["Detector packs", "secrets / PII /", "destructive /", "prod / MCP"], fs=7.5)
+        self._box(cx + 8, 252, sw, 78, ["Query compiler", "structured -> q", "+ mandatory", "row entitlements"], fs=7.5)
+        self._box(cx + 12 + sw, 252, sw, 78, ["IFC + detectors", "untrusted can't", "drive a sink;", "secrets/PII/prod"], fs=7.5)
         self._box(cx + 16 + 2 * sw, 252, sw, 78, ["Egress proxy", "host allowlist /", "SSRF /", "payload DLP"], fs=7.5)
         self._arrow(cx + colw / 2, 240, cx + colw / 2, 218, "only safe, bounded, allowlisted actions")
         # production systems
@@ -190,9 +190,17 @@ def main() -> int:
                   "- it sends a <i>structured request</i> that Aegis <b>compiles</b> into bounded, "
                   "allowlisted q. Dangerous operations have <b>no slot in the grammar</b>: structurally "
                   "impossible, not merely detected.",
+                  "<b>Rows are governed, not just tables.</b> A mandatory, non-removable per-principal "
+                  "<b>row filter</b> is ANDed into every compiled query - so an analyst sees only the rows "
+                  "their entitlement allows, even through joins/set-ops or when they explicitly ask for "
+                  "rows outside their set.",
+                  "<b>Provenance decides privilege (the injection defense).</b> Every content item the agent "
+                  "sees is labelled trusted or untrusted; <b>untrusted content can never drive a privileged "
+                  "action</b> (a trade, an email, a write, an egress). The injection need not be detected - "
+                  "it simply cannot reach a trigger. This is information-flow control.",
                   "<b>Confinement is load-bearing; the gate is defense-in-depth.</b> The kdb+ process runs "
-                  "non-root, read-only HDB, no shell, no egress - so even a gate bypass cannot "
-                  "destroy data or reach the network.",
+                  "non-root, read-only HDB, no shell, no egress, under a <b>seccomp syscall filter</b> - so "
+                  "even a gate bypass cannot destroy data, reach the network, or attack the kernel.",
               ])]
 
     story += [P("3 &nbsp; What it is tested to stop", "H"),
@@ -202,12 +210,16 @@ def main() -> int:
              "Destroying or corrupting data on disk (HDB partitions, the sym file)",
              "Mutating the live data (delete / insert / update)",
              "Stealing sensitive / client data (positions, P&amp;L, account_no, salary)",
-             "Reaching outside its lane (non-allowlisted tables, the production HDB)",
+             "Reaching outside its lane (non-allowlisted tables, columns, or <b>rows</b> the principal "
+             "is not entitled to)",
              "Exfiltration &amp; remote code (outbound connections, native shared-object load)",
              "Hijacking the process itself (message-handler replacement, exit)",
              "Resource exhaustion / DoS (unbounded scans that degrade the box)",
              "Reading protected files (the policy, password lists, the audit log)",
-             "Evasion / injection (obfuscation, dynamic eval, injection via the API&rsquo;s own fields)"]
+             "Evasion / injection (obfuscation, dynamic eval, injection via the API&rsquo;s own fields)",
+             "<b>Indirect prompt injection</b> - a malicious instruction hidden in a tool result (a file, a "
+             "query&rsquo;s free-text field, a web/MCP response) that tries to drive a privileged action; "
+             "stopped by information-flow control (untrusted-derived actions can&rsquo;t reach a sink)"]
     story += [Table([[P(f"<b>{i+1}.</b>", "Cell"), P(t, "Cell")] for i, t in enumerate(stops)],
                     colWidths=[9 * mm, 155 * mm],
                     style=TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("BOTTOMPADDING", (0, 0), (-1, -1), 2)]))]
@@ -216,13 +228,16 @@ def main() -> int:
     comp = [["Component", "Role", "Property"],
             ["PDP (engine, pdp_service)", "decides every action against the signed policy", "out-of-process, fail-closed"],
             ["Query compiler", "compiles structured requests to bounded q", "injection structurally impossible"],
+            ["Row entitlements", "mandatory per-principal row filter, ANDed into every table ref", "non-removable, can't widen, covers joins"],
+            ["Information-flow control (ifc)", "untrusted content can't reach a privileged sink", "deterministic injection defense"],
             ["Detector packs", "veto: secrets / PII / destructive / prod / resource / MCP", "deterministic, defense-in-depth"],
             ["Egress proxy", "network egress control", "host allowlist + SSRF + payload DLP"],
-            ["Signing", "Ed25519-signed policy; agent cannot forge", "integrity / non-repudiation"],
+            ["Signing + change guard", "Ed25519-signed policy; an edit may only narrow without approval", "integrity; widening needs sign-off"],
+            ["Schema-drift linter", "diffs the signed policy vs the live schema", "catches lockout + unbounded-scan drift"],
             ["WORM audit", "tamper-evident record of every decision", "hash-chain + off-host mirror + anchor"],
             ["Supervisor + kill switch", "trips a breaker + kills on behavioural tripwires", "deterministic, load-bearing"],
             ["LLM overseer", "reads the audit, narrates incidents", "advisory only, never gates, out-of-band"],
-            ["OS confinement", "the containment boundary", "kernel-enforced (Landlock + namespaces)"]]
+            ["OS confinement", "the containment boundary", "namespaces + Landlock + seccomp"]]
     t = Table([[Paragraph(c, s["CellH"] if r == 0 else s["Cell"]) for c in row] for r, row in enumerate(comp)],
               colWidths=[42 * mm, 74 * mm, 48 * mm])
     t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), ACCENT),
@@ -239,27 +254,34 @@ def main() -> int:
               bullets([
                   "<b>Schema, tables &amp; columns.</b> The structured-query allowlist - allowed tables, "
                   "per-table columns, required-date tables, row caps, permitted aggregations/operators - is "
-                  "declared in the policy. Add a table or column the desk needs, or remove one that is "
-                  "off-limits, by editing the allowlist; the validator (<font face=\"Courier\">aegis."
-                  "policy_lint</font>) checks it is well-formed before signing.",
+                  "declared in the policy. The validator (<font face=\"Courier\">aegis.policy_lint</font>) "
+                  "checks it is well-formed, and <font face=\"Courier\">aegis.policy_schema_diff</font> checks "
+                  "it against the <b>live schema</b> so a dropped column (silent lockout) or a new "
+                  "partitioned table without a date bound (unbounded scan) is caught before signing.",
+                  "<b>Row entitlements.</b> Per-principal row filters (which rows each principal may see - by "
+                  "region, book, symbol, desk) are declared in the policy and injected mandatorily into every "
+                  "compiled query; a wildcard baseline plus table-specific rules combine fail-safe.",
                   "<b>Rules &amp; threat packs.</b> Each pack (secrets, PII terms, destructive ops, prod "
                   "markers, resource limits, MCP manifests, per-tool argument rules) is enabled and tuned in "
-                  "the policy - turn a pack on or off, add a sensitive term, a prod host/port pattern, a "
-                  "protected path. New deterministic rules ship as packs without touching the gate.",
+                  "the policy. New deterministic rules ship as packs without touching the gate.",
+                  "<b>Information-flow policy.</b> Which tools are privileged sinks (egress, write, order, "
+                  "scoped query) and which columns/sources are untrusted (free-text fields, external tool "
+                  "results) are declared so the IFC veto knows what untrusted content must not drive.",
                   "<b>Tool surface &amp; principals.</b> Which named tools an agent (or a specific principal) "
                   "may use is a grant list, with RBAC scoping per principal; the free-form/break-glass surface "
                   "is a separate, separately-signed policy.",
-                  "<b>Supervisor &amp; kill action.</b> Behavioural tripwires (which rules are critical, the "
-                  "block/escalation thresholds) and the kill action (signal / docker kill / kubectl delete / "
-                  "callback) are policy-configured.",
-                  "<b>Confinement &amp; deployment.</b> The hardening profile (read-only mounts, dropped caps, "
-                  "egress allowlist, resource limits) is declarative and CI-checked against your real manifest.",
+                  "<b>Supervisor, kill action &amp; confinement.</b> Behavioural tripwires, the kill action "
+                  "(signal / docker kill / kubectl delete / callback), and the hardening profile (read-only "
+                  "mounts, dropped caps, egress allowlist, syscall filter, resource limits) are declarative "
+                  "and CI-checked against your real manifest.",
               ]),
-              P("<b>The change workflow:</b> author from the template, run the validator until clean, sign it "
-                "(Ed25519), mount it read-only. Changing a rule = edit, re-validate, re-sign, reload the PDP - "
-                "<b>no code change, fully audited.</b> A turnkey authoring kit "
-                "(<font face=\"Courier\">policy.kdb.template.json</font> + the validator + a guide) lets the "
-                "control function do all of this - and run the real-data re-soak - themselves.")]
+              P("<b>The change workflow:</b> author from the template, run the validators until clean, sign it "
+                "(Ed25519), mount it read-only. Every edit is checked by the <b>policy-change guard</b>: a "
+                "change that only narrows the allow-set auto-applies; one that <b>widens</b> it (grants any new "
+                "capability) is refused until a human approves, and the exact new grant is named. Changing a "
+                "rule = edit, re-validate, re-sign, reload the PDP - <b>no code change, fully audited.</b> A "
+                "turnkey authoring kit lets the control function do all of this - and run the real-data "
+                "re-soak - themselves.")]
 
     story += [PageBreak(), P("6 &nbsp; How it works (request lifecycle)", "H"),
               ListFlowable([ListItem(Paragraph(x, s["Bull"]), leftIndent=10) for x in [
@@ -269,8 +291,12 @@ def main() -> int:
                   "<b>default-deny grants</b> (is the tool / table / column even allowed?).",
                   "The <b>query compiler</b> validates every field against allowlists and emits "
                   "<b>bounded q</b> - a date filter is required on partitioned tables, the result is "
-                  "capped, and the compiled output is re-checked against a dangerous-construct backstop. "
-                  "Any off-allowlist field &rarr; reject.",
+                  "capped, the principal&rsquo;s <b>mandatory row-entitlement filter is ANDed in</b> (covering "
+                  "both sides of any join/set-op), and the output is re-checked against a backstop. Any "
+                  "off-allowlist field &rarr; reject.",
+                  "The <b>information-flow veto</b> checks provenance: if the action&rsquo;s arguments were "
+                  "derived from <b>untrusted</b> content and the tool is a <b>privileged sink</b>, it is "
+                  "blocked before it runs - regardless of what the injected text said.",
                   "<b>Detector packs</b> and the <b>egress proxy</b> veto anything that passes.",
                   "The decision (allow / block / require-approval) is recorded to the <b>tamper-evident "
                   "audit</b>, mirrored off-host.",
@@ -278,27 +304,38 @@ def main() -> int:
                   "<b>circuit breaker</b> that quarantines the principal and fires a <b>kill switch</b>. The "
                   "<b>LLM overseer</b> narrates the incident out-of-band (advisory; never delays a decision).",
                   "Only an allow reaches the real kdb+ gateway - and even then the agent runs inside "
-                  "<b>OS confinement</b> that physically prevents shell, file destruction, and egress.",
+                  "<b>OS confinement</b> that physically prevents shell, file destruction, egress, and the "
+                  "dangerous syscalls.",
               ]], bulletType="1", leftIndent=14)]
 
     story += [P("7 &nbsp; How we tested it", "H"),
               P("Validated by deterministic, runnable proofs - not assertions."),
               bullets([
-                  "<b>Acceptance suite (CI-gated):</b> 27 core batteries on Python 3.10-3.12, a wheel "
+                  "<b>Acceptance suite (CI-gated):</b> 32 core batteries on Python 3.10-3.12, a wheel "
                   "fresh-install smoke test, the deployment-hardening gate, and ruff - every push.",
                   "<b>Formal:</b> the default-deny grant algebra proved sound &amp; monotonic by exhaustion "
-                  "and by <b>Z3/SMT over unbounded domains</b> (24 theorems).",
-                  "<b>OS confinement on real Linux:</b> adversarial test 7/7 + Landlock filesystem test 6/6 "
-                  "- kernel-enforced, fail-closed.",
+                  "and by <b>Z3/SMT over unbounded domains</b>; AWS&rsquo;s open-source <b>Cedar Analysis CLI "
+                  "(CVC5)</b> independently corroborates the exported policy.",
+                  "<b>q-semantics conformance on real kdb+:</b> the compiler&rsquo;s emitted q is run against a "
+                  "live instance to prove the bounds hold - the materialisation cap holds, a reducing query "
+                  "is not corrupted, the entitlement predicate is effective, and the database is read-only "
+                  "afterwards.",
+                  "<b>OS confinement on real Linux:</b> the adversarial test and Landlock filesystem test "
+                  "(fail-closed), plus the <b>seccomp-bpf</b> syscall deny-list verified at the kernel level "
+                  "(a blocked syscall is killed with SIGSYS while benign ones run).",
                   "<b>Production-scale realism soak (headline evidence)</b> on ~<b>4 billion rows</b> "
                   "(4 FSP HDBs, 500M trade + 500M quote each, partitioned, 166 GB): <b>no hints</b> (schema "
                   "discovered via meta); an <b>uncooperative attacker</b> (0 refused) &rarr; <b>0/30 attacks "
-                  "succeeded</b>; <b>ground-truth correctness</b> checked against independently-computed q "
-                  "(served-<i>and-correct</i>). Every benign miss was the model writing the wrong query, "
-                  "never the guardrail.",
-                  "<b>The process found &amp; fixed two real defects</b> in the primary control (a row cap "
-                  "that corrupted aggregations at scale; a follow-on materialization regression) - "
-                  "exactly what scale + ground-truth checking exist to catch.",
+                  "succeeded</b>; <b>ground-truth correctness</b> checked against independently-computed q. "
+                  "<b>Row entitlements</b> held at scale (an analyst sees only its entitled rows, even through "
+                  "joins or when asking for others). The process found &amp; fixed real defects in the primary "
+                  "control - exactly what scale + ground-truth checking exist to catch.",
+                  "<b>Prompt injection (information-flow control):</b> on the estate, a real indirect-injection "
+                  "corpus gave <b>100% block, 0 benign false positives</b>. On the <b>AgentDojo</b> standard "
+                  "benchmark (official, Opus) the agent keeps real utility and targeted-attack-success sits at "
+                  "or near zero with IFC firing on the canonical injections; the clean with-versus-without "
+                  "delta on the egress suites is <b>partially complete</b> (an API-credit stop), documented "
+                  "and resumable - corroboration of an already-proven property, not a blocker.",
               ])]
 
     story += [PageBreak(), P("8 &nbsp; Honest limitations - what Aegis is <i>not</i>", "H"),
@@ -308,26 +345,49 @@ def main() -> int:
                   "IAM / DLP / change-control - it composes with them.",
                   "<b>The gate is not the containment.</b> A denylist over a Turing-complete language is "
                   "leaky; the kernel confinement is what actually contains a determined agent.",
-                  "A namespace/Landlock sandbox is <b>weaker than a microVM</b> against a kernel-level "
-                  "attacker. For adversarial multi-tenant, run the same policy inside a microVM "
-                  "(Firecracker/Kata) - documented, not yet deployed.",
+                  "A namespace/Landlock/seccomp sandbox is <b>weaker than a microVM</b> against a kernel-level "
+                  "attacker (out of scope: a kernel 0-day in an allowed syscall, side channels). The seccomp "
+                  "layer blocks the clearly-dangerous syscalls, shrinking the largest part of that gap. For "
+                  "adversarial multi-tenant, run the same policy inside a microVM (Firecracker/Kata) - "
+                  "documented, not yet deployed.",
+                  "<b>The injection defense is structural, but its false-positive cost is surface-specific.</b> "
+                  "On the kdb+ analyst surface the false-positive rate is zero (query columns are structured "
+                  "trusted data). On a broad tool surface (chat, email, document agents), where benign actions "
+                  "routinely derive from untrusted content, the same rule can over-block and must be tuned per "
+                  "surface - the AgentDojo runs surface exactly this nuance.",
                   "The reported numbers are on a <b>representative</b> corpus and a <b>synthetic</b> "
-                  "(if realistic-scale) schema. They prove the design; they are <b>not</b> a production "
-                  "number. The control function must re-soak on the <b>real desk corpus and real data</b> "
-                  "before enforcing - the one gate only they can close.",
+                  "(if realistic-scale) schema, plus a partial run of the AgentDojo benchmark. They prove the "
+                  "design; they are <b>not</b> a production number. The control function must re-soak on the "
+                  "<b>real desk corpus and real data</b> before enforcing - the one gate only they can close.",
                   "The free-form (raw-q) surface exists only as <b>admin-only break-glass</b>, separately "
                   "signed, never granted to an analyst; it is honestly weaker than the structured surface.",
+                  "<b>Numeric overflow is the model&rsquo;s, not the gate&rsquo;s.</b> q <font face=\"Courier\">"
+                  "sum</font> over a 64-bit integer column wraps silently; the compiler bounds which rows are "
+                  "read and the result size, but does not widen aggregations. The conformance battery surfaces "
+                  "this; the fix is an estate-side schema choice (widen those columns to long).",
               ])]
 
-    story += [P("9 &nbsp; Status &amp; what remains", "H"),
+    story += [P("9 &nbsp; Where this sits versus the frontier", "H"),
+              P("A 2026 multi-source review places Aegis as strongly <b>aligned</b> with the deterministic, "
+                "out-of-band enforcement direction the field has converged on, and <b>ahead</b> in one place: "
+                "no competitor was found compiling agent queries as a safety gate (the closest research uses "
+                "an LLM to <i>rewrite</i> queries - the opposite trust model), and none at the q/kdb+ plane. "
+                "The information-flow layer brings the prompt-injection defense level with the research "
+                "frontier. The honest residual gaps are a microVM substrate for fully-untrusted third-party "
+                "code and completing the standard-benchmark delta."),
+              P("10 &nbsp; Status &amp; what remains", "H"),
               P("<b>Engineering: complete and validated</b> on the structured kdb+ analyst surface - "
-                "bounded-by-construction query plane, kernel confinement, two-tier oversight + kill switch, "
-                "signed out-of-process PDP, tamper-evident WORM audit, installable package, CI-gated at 27/27."),
+                "bounded-by-construction query plane, mandatory row entitlements, deterministic "
+                "prompt-injection defense, kernel confinement (namespaces + Landlock + seccomp), two-tier "
+                "oversight + kill switch, signed out-of-process PDP with a policy-change guard, tamper-evident "
+                "WORM audit, installable package, CI-gated at 32/32."),
               P("<b>Remaining - the human gates (not code):</b>"),
               bullets([
                   "Control-function <b>real-data re-soak</b> (the authoring kit makes this turnkey).",
                   "A <b>design partner</b> running it in monitor mode on production traffic.",
                   "A <b>third-party security audit</b> before a production estate depends on it.",
+                  "Completing the <b>AgentDojo official with-versus-without delta</b> on the egress suites "
+                  "(resumable; corroboration, not a blocker).",
               ]),
               P("<b>Recommendation:</b> GO to enforce on the structured analyst surface, conditioned on "
                 "confinement deployed (load-bearing), free-form kept off the analyst grant, and the signed "
