@@ -105,10 +105,13 @@ class Diagram(Flowable):
         self.canv.setFont("Helvetica-Bold", 8)
         self.canv.setFillColor(ACCENT)
         self.canv.drawCentredString(cx + colw / 2, 342, "Policy Decision Point - out-of-process / signed / FAIL-CLOSED")
-        sw = (colw - 32) / 3
-        self._box(cx + 8, 252, sw, 78, ["Query compiler", "structured -> q", "+ mandatory", "row entitlements"], fs=7.5)
-        self._box(cx + 12 + sw, 252, sw, 78, ["IFC + detectors", "untrusted can't", "drive a sink;", "secrets/PII/prod"], fs=7.5)
-        self._box(cx + 16 + 2 * sw, 252, sw, 78, ["Egress proxy", "host allowlist /", "SSRF /", "payload DLP"], fs=7.5)
+        gap = 6
+        sw = (colw - 16 - 3 * gap) / 4
+        xs = [cx + 8 + i * (sw + gap) for i in range(4)]
+        self._box(xs[0], 252, sw, 78, ["Query compiler", "structured", "-> bounded q", "+ row entl."], fs=6.8)
+        self._box(xs[1], 252, sw, 78, ["Info-flow ctrl", "untrusted", "can't reach", "a sink"], fs=6.8)
+        self._box(xs[2], 252, sw, 78, ["Detector packs", "secrets / PII", "destructive", "prod / MCP"], fs=6.8)
+        self._box(xs[3], 252, sw, 78, ["Egress proxy", "host allowlist", "SSRF /", "payload DLP"], fs=6.8)
         self._arrow(cx + colw / 2, 240, cx + colw / 2, 218, "only safe, bounded, allowlisted actions")
         # production systems
         self._box(cx, 184, colw, 32, ["Production systems", "kdb+ HDB & gateways / network"], fs=9)
