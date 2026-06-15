@@ -123,6 +123,28 @@ def run() -> int:
     out, _ = compiles(qspan, {"table": "trade", "aggs": [{"fn": "count", "as": "n"}], "date": {"from": "2025.06.01", "to": "2025.06.30"}}, None)
     check("14 REDUCING query over wide range -> OK (exempt from span cap)", out is not None, "reducing must not be span-capped")
 
+    # --- review fixes: combine `*`+table, and gate `meta` -------------------
+    # 15. `*` baseline AND table-specific must BOTH apply (no widening by table
+    #     rule replacing the global one). A principal with both is the narrowest.
+    both = _qc(principals={"p": {"row_filters": {
+        "*": [{"col": "region", "op": "in", "value": ["EMEA"]}],
+        "trade": [{"col": "sym", "op": "in", "value": ["AAPL", "MSFT"]}]}}})
+    out, _ = compiles(both, {"table": "trade", "columns": ["sym", "price"], "date": D}, "p")
+    check("15 `*` AND table-specific BOTH applied (region AND sym), not replaced",
+          out and "region in `EMEA" in out and "sym in `AAPL`MSFT" in out, out)
+    # the `*`-only table still gets the baseline (sanity: no table rule to add)
+    out, _ = compiles(both, {"table": "quote", "columns": ["sym"], "date": D}, "p")
+    check("15b `*` baseline still applies to a table with no specific rule",
+          out and "region in `EMEA" in out and "sym in" not in out, out)
+
+    # 16. meta returns no rows but must still honour default-deny: an
+    #     un-entitled principal cannot enumerate a table's schema.
+    out, err = compiles(qc, {"table": "trade", "op": "meta"}, "analyst-nobody")
+    check("16 meta by un-entitled principal under default_deny -> REJECT",
+          out is None and "denied" in (err or ""), err or out)
+    out, _ = compiles(qc, {"table": "trade", "op": "meta"}, "analyst-equities")
+    check("16b meta by an entitled principal -> OK", out == "meta trade", out)
+
     print(f"\n{'PASS' if fails == 0 else 'FAIL'} — {fails} failure(s)")
     return 1 if fails else 0
 

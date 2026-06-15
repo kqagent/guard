@@ -328,28 +328,44 @@ class QueryCompiler:
             return f'{col} like "{val}"'
         self._reject(f"filter op '{op}' not allowed")
 
+    def _entitlement_gate(self, principal, table: str) -> None:
+        """Fail-closed membership check, no predicate compilation. Under
+        default_deny a principal must have SOME entitlement (a '*' baseline or a
+        table-specific entry) for the table, else the query is denied. Used both
+        before compiling row predicates and to gate `meta` (which returns no rows
+        but must still respect default-deny)."""
+        if self.ent_mode != "default_deny":
+            return
+        rule = self.ent_principals.get(principal)
+        if rule is None:
+            self._reject(f"principal {principal!r} has no row entitlements (default-deny) - denied")
+        if rule.get("*") is None and rule.get(table.lower()) is None:
+            self._reject(f"principal {principal!r} has no row entitlement for table '{table}' (default-deny) - denied")
+
     def _entitlement_preds(self, principal, table: str, cols_allowed: set) -> list[str]:
         """MANDATORY per-principal row filter for `table`. Returns predicate
         strings to be ANDed (non-removably) into the WHERE clause of EVERY table
         reference. The agent cannot set `principal`, cannot remove these, and
         cannot widen past them (they AND with its own filters -> intersection).
-        Fail-closed under default_deny; no-op under open mode (default)."""
+        Fail-closed under default_deny; no-op under open mode (default).
+
+        FAIL-SAFE COMBINE: a '*' baseline and a table-specific entry are BOTH
+        applied (ANDed), not replace-one-with-the-other. So a global restriction
+        (e.g. region) is never silently dropped for a table that also has a
+        column-specific rule - forgetting can only over-restrict, never widen."""
         if self.ent_mode != "default_deny" and not self.ent_principals:
             return []   # entitlements not configured -> no row filter (back-compat)
+        self._entitlement_gate(principal, table)
         rule = self.ent_principals.get(principal)
         if rule is None:
-            if self.ent_mode == "default_deny":
-                self._reject(f"principal {principal!r} has no row entitlements (default-deny) — denied")
-            return []
-        filters = rule.get(table.lower())
-        if filters is None:
-            filters = rule.get("*")
-        if filters is None:
-            if self.ent_mode == "default_deny":
-                self._reject(f"principal {principal!r} has no row entitlement for table '{table}' (default-deny) — denied")
-            return []
+            return []   # open mode, unknown principal -> no row filter
+        filters = []
+        if rule.get("*") is not None:                      # global baseline (always applies)
+            filters += self._list(rule["*"], "entitlement row_filters")
+        if rule.get(table.lower()) is not None:            # plus table-specific (ANDed)
+            filters += self._list(rule[table.lower()], "entitlement row_filters")
         # Compile each entitlement filter through the SAME injection-safe path.
-        return [self._filter_pred(f, cols_allowed) for f in self._list(filters, "entitlement row_filters")]
+        return [self._filter_pred(f, cols_allowed) for f in filters]
 
     def _where_expr(self, req: dict, table: str, cols_allowed: set, principal=None) -> str:
         preds = []
@@ -462,6 +478,7 @@ class QueryCompiler:
     def _compile_select(self, req: dict, principal=None) -> str:
         table = self._table(req.get("table"))
         if req.get("op") == "meta":
+            self._entitlement_gate(principal, table)   # meta returns no rows but still honours default-deny
             return f"meta {table}"
         cols_allowed = self._cols_for(table)
         self._max_span_check(req, table)
