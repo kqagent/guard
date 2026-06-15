@@ -14,11 +14,18 @@ Each battery is also runnable standalone: `python -m aegis.<name>` for
 demo, example_api_loop, proxy, pdp_test, query_proxy_test, egress_proxy_test,
 signing_test, confinement_test, audit_worm_test, monitor, formal,
 agentdojo_eval, compliance, mcp_test, redteam_corpus, worm_sinks_test,
-approvals_test, budget_test, sdk_test, cedar_export.
+approvals_test, budget_test, sdk_test, cedar_export, policy_schema_diff_test.
+
+Policy-correctness CLI (catch schema drift before re-signing a policy):
+`python -m aegis.policy_schema_diff --policy aegis/policy.json --schema snap.json`
+(or `--hdb /data/hdb` to read a live schema via q).
 
 OPTIONAL tier: `verify_kdb_bridge` (needs `tools/gate.js` from the old
-kqScrape repo — not in this repo) and `formal_smt` (Z3 proofs over unbounded
-domains; needs the `[formal]` extra, installed in this venv).
+kqScrape repo — not in this repo), `formal_smt` (Z3 proofs over unbounded
+domains; needs the `[formal]` extra, installed in this venv), and
+`q_conformance_test` (proves the compiler's safety bounds on REAL kdb+; needs
+a q binary — auto-found at `$HOME/kdbx/l64/q`, see `aegis/qexec.py`; skips
+cleanly when q is absent).
 
 The official AgentDojo run: `python tools/run_agentdojo_official.py --dry-run`
 works keyless; the live score needs ANTHROPIC_API_KEY (see aegis/AGENTDOJO.md).

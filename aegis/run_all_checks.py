@@ -44,6 +44,7 @@ CORE = [
     ("overseer_test", "LLM overseer (2nd line): reads logs, advisory verdict + incident narrative"),
     ("overseer_wiring_test", "overseer wired advisory-only: narrative attached, gate identical, no allow/clear path"),
     ("policy_lint_test", "policy authoring validator: catches malformed control-function policies"),
+    ("policy_schema_diff_test", "policy-vs-schema drift linter: too-tight (lockout) + too-loose (scan) drift"),
 ]
 OPTIONAL = [
     ("verify_kdb_bridge", "bridges this repo's tools/gate.js (needs Node)"),

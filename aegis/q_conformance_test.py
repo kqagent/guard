@@ -32,52 +32,18 @@ Run:  python -m aegis.q_conformance_test
 
 from __future__ import annotations
 
-import base64
-import os
-import subprocess
 import sys
 
+from .qexec import q_available, q_run, run_bash
 from .query_compiler import QueryCompiler, StructuredQueryRejected
 
 # -- q invocation ----------------------------------------------------------
 
-Q_BIN = os.environ.get("AEGIS_Q_BIN", "$HOME/kdbx/l64/q")
-QHOME = os.environ.get("AEGIS_QHOME", "$HOME/kdbx")
-QLIC = os.environ.get("AEGIS_QLIC", "$HOME/kdbx")
 WORK = "/tmp/aegis_qconf"
 HDB = f"{WORK}/hdb"
 N = 5000                       # rows per partition per table
 DATES = ["2025.06.02", "2025.06.03", "2025.06.04"]
 CAP = 1000                     # small max_rows so the materialisation cap is observable
-
-
-def _sh_prefix() -> list[str]:
-    """Argv prefix to run a bash command string. On Windows q lives in WSL."""
-    if sys.platform == "win32":
-        return ["wsl", "-e", "bash", "-lc"]
-    return ["bash", "-lc"]
-
-
-def _run_bash(cmd: str, timeout: int = 120) -> str:
-    r = subprocess.run(_sh_prefix() + [cmd], capture_output=True, text=True, timeout=timeout)
-    return ((r.stdout or "") + (r.stderr or "")).strip()
-
-
-def q_run(program: str, timeout: int = 120) -> str:
-    """Run a q program (transferred base64 to dodge ALL shell quoting) and return
-    its stdout+stderr. The program is responsible for printing its result and
-    exiting."""
-    b64 = base64.b64encode(program.encode("utf-8")).decode("ascii")
-    cmd = (f"mkdir -p {WORK} && echo {b64} | base64 -d > {WORK}/prog.q && "
-           f"QHOME={QHOME} QLIC={QLIC} {Q_BIN} {WORK}/prog.q -q")
-    return _run_bash(cmd, timeout)
-
-
-def q_available() -> bool:
-    try:
-        return q_run("-1 .Q.s1 1+1; exit 0;", timeout=30).splitlines()[-1].strip() == "2"
-    except Exception:
-        return False
 
 
 # -- HDB fixture -----------------------------------------------------------
@@ -103,14 +69,14 @@ mk each {dts};
 -1 "BUILT";
 exit 0;
 """
-    out = q_run(prog, timeout=180)
+    out = q_run(prog, workdir=WORK, timeout=180)
     return out
 
 
 def _eval(expr_program: str, timeout: int = 120) -> str:
     """Load the HDB then run a q snippet that prints ONE token; return that token."""
     prog = f'system "l {HDB}";\n{expr_program}\nexit 0;'
-    out = q_run(prog, timeout)
+    out = q_run(prog, workdir=WORK, timeout=timeout)
     lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
     return lines[-1] if lines else ""
 
@@ -118,7 +84,7 @@ def _eval(expr_program: str, timeout: int = 120) -> str:
 def hdb_fingerprint() -> str:
     """A cheap content fingerprint of the HDB tree (paths + sizes), to prove no
     compiled query mutates anything on disk."""
-    return _run_bash(f"find {HDB} -type f -printf '%P %s\\n' 2>/dev/null | sort | md5sum")
+    return run_bash(f"find {HDB} -type f -printf '%P %s\\n' 2>/dev/null | sort | md5sum")
 
 
 # -- the battery -----------------------------------------------------------
@@ -272,7 +238,7 @@ def run() -> int:
 
     print(f"\n{'PASS' if fails == 0 else 'FAIL'} — {fails} failure(s) against real kdb+")
     # cleanup
-    _run_bash(f"rm -rf {WORK}")
+    run_bash(f"rm -rf {WORK}")
     return 1 if fails else 0
 
 
