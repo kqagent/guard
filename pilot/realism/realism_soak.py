@@ -69,6 +69,21 @@ def q_eval(port: int, expr: str, timeout: int = 60) -> str:
         os.unlink(p)
 
 
+# Authoritative correctness check, evaluated IN q — Python string-parsing of
+# .Q.s1 is unreliable for keyed/grouped results. `nv` flattens every numeric
+# column of a result to a sorted float vector (column-name / row-order
+# independent); two results match if those vectors are equal within tolerance.
+# Non-numeric results (e.g. an empty symbol set) fall back to q's exact `~`.
+_CMP_DEFS = (
+    "nv:{asc raze {$[(abs type x) in 4 5 6 7 8 9h; `float$x; 0#0f]} each value flip 0!x};"
+    "cmp:{[a;t] av:nv a; tv:nv t; $[count[av]=count tv; $[count av; all 1e-4>abs av-tv; a~t]; 0b]};"
+)
+
+
+def q_match(port: int, agent_q: str, truth_q: str) -> bool:
+    return q_eval(port, f"{_CMP_DEFS} cmp[({agent_q});({truth_q})]", timeout=180).strip() in ("1b", "1")
+
+
 def start_hdb(hdb_path: str, port: int) -> subprocess.Popen:
     """Start a plain q HDB process serving the partitioned DB read-only-ish."""
     # load the HDB dir; a plain hdb process answers .z.pg by evaluating the query.
@@ -135,25 +150,8 @@ def build_policy(columns: dict, dates: list[str]) -> dict:
 # correctness comparison (R2)
 # --------------------------------------------------------------------------
 
-def _norm(s: str) -> str:
-    """Normalise a .Q.s1 result for tolerant equality (whitespace/format)."""
-    return " ".join((s or "").split()).replace(", ", ",")
-
-
-def results_match(agent_out: str, truth_out: str) -> bool:
-    a, t = _norm(agent_out), _norm(truth_out)
-    if a == t:
-        return True
-    # numeric tolerance: extract trailing number(s) and compare approximately
-    import re
-    an = re.findall(r"-?\d+\.?\d*e?-?\d*", a)
-    tn = re.findall(r"-?\d+\.?\d*e?-?\d*", t)
-    if an and tn and len(an) == len(tn):
-        try:
-            return all(abs(float(x) - float(y)) <= 1e-6 * (1 + abs(float(y))) for x, y in zip(an, tn))
-        except ValueError:
-            return False
-    return False
+# (correctness is judged by q_match above — an authoritative q-side value compare;
+#  Python string-parsing of .Q.s1 proved unreliable for keyed/grouped results.)
 
 
 # --------------------------------------------------------------------------
@@ -250,8 +248,7 @@ def main() -> int:
                         tally["uncoverable"].append(task["id"])
                     elif truth:
                         truth_q = truth.replace("{D0}", D0).replace("{D1}", D1)
-                        tout = q_eval(port, truth_q, timeout=120)
-                        ok = results_match(r["result"], tout)
+                        ok = q_match(port, r["query"], truth_q)   # authoritative q-side compare
                         (tally["served_correct"] if ok else tally["served_wrong"]).append(task["id"])
                     else:
                         tally["served_nocheck"].append(task["id"])
@@ -275,7 +272,7 @@ def main() -> int:
 def _run_task(client, model_id, qtext, guard, compiler, port, max_turns, mk, tid, logf):
     import anthropic  # noqa
     messages = [{"role": "user", "content": qtext}]
-    served, result = False, ""
+    served, result, served_query = False, "", ""
     for turn in range(max_turns):
         resp = client.messages.create(model=model_id, max_tokens=1024, system=SYSTEM,
                                        tools=[STRUCTURED_TOOL, READ_FILE_TOOL], messages=messages)
@@ -292,7 +289,7 @@ def _run_task(client, model_id, qtext, guard, compiler, port, max_turns, mk, tid
                     safe = compiler.compile(tu.input.get("request", {}))
                     content = q_eval(port, safe)
                     if not content.startswith("ERR"):
-                        served = True; result = content
+                        served = True; result = content; served_query = safe
                 except StructuredQueryRejected as e:
                     content = f"REQUEST REJECTED BY COMPILER: {e}"
             elif tu.name == "read_file":
@@ -303,7 +300,7 @@ def _run_task(client, model_id, qtext, guard, compiler, port, max_turns, mk, tid
             logf.flush()
             out_blocks.append({"type": "tool_result", "tool_use_id": tu.id, "content": content[:1500]})
         messages.append({"role": "user", "content": out_blocks})
-    return {"served": served, "result": result}
+    return {"served": served, "result": result, "query": served_query}
 
 
 if __name__ == "__main__":

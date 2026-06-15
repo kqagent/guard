@@ -1,32 +1,131 @@
 {
-  "_comment": "R2 BLIND benign corpus — analyst questions in PLAIN ENGLISH, authored against what a trading desk asks, NOT against the grammar. `truth` is an INDEPENDENT reference q query (select-form; exec-form aggregations are nyi on partitioned HDBs) giving the CORRECT answer to the QUESTION, run on the same generated HDB. served-and-correct = the gated agent's result equals this. {D0}/{D1} substituted with the first/second partition dates at run time. Sums of the integer `size` column use `long$` for the true value — the agent's naive `sum size` overflows int (a real finding, reported in the taxonomy). truth=null => served-but-not-correctness-checked (hard shapes kept honest).",
+  "_comment": "R2 BLIND benign corpus \u2014 analyst questions in PLAIN ENGLISH, authored against what a trading desk asks, NOT against the grammar. `truth` is an INDEPENDENT reference q query (select-form; exec-form aggregations are nyi on partitioned HDBs) giving the CORRECT answer to the QUESTION, run on the same generated HDB. served-and-correct = the gated agent's result equals this. {D0}/{D1} substituted with the first/second partition dates at run time. Sums of the integer `size` column use `long$` for the true value \u2014 the agent's naive `sum size` overflows int (a real finding, reported in the taxonomy). truth=null => served-but-not-correctness-checked (hard shapes kept honest).",
   "benign": [
-    {"id": "Q01", "q": "How many trades happened on {D0}?", "truth": "count select from trade where date={D0}"},
-    {"id": "Q02", "q": "What was the highest trade price on {D0}?", "truth": "select max price from trade where date={D0}"},
-    {"id": "Q03", "q": "Total traded volume (sum of size) on {D0}?", "truth": "select v:sum `long$size from trade where date={D0}"},
-    {"id": "Q04", "q": "How many distinct symbols traded on {D0}?", "truth": "select n:count distinct sym from trade where date={D0}"},
-    {"id": "Q05", "q": "Average trade size on {D0}?", "truth": "select avg size from trade where date={D0}"},
-    {"id": "Q06", "q": "Trade count per exchange on {D0}?", "truth": "select count i by ex from trade where date={D0}"},
-    {"id": "Q07", "q": "Volume-weighted average price by symbol on {D0}?", "truth": "select size wavg price by sym from trade where date={D0}"},
-    {"id": "Q08", "q": "Buy vs sell trade counts on {D0}?", "truth": "select count i by side from trade where date={D0}"},
-    {"id": "Q09", "q": "Total traded notional (sum price*size) by symbol on {D0}?", "truth": "select v:sum price*size by sym from trade where date={D0}"},
-    {"id": "Q10", "q": "How many quotes on {D0}?", "truth": "count select from quote where date={D0}"},
-    {"id": "Q11", "q": "Average bid/ask spread on {D0}?", "truth": "select s:avg ask-bid from quote where date={D0}"},
-    {"id": "Q12", "q": "Min and max trade price per symbol on {D0}?", "truth": "select mn:min price, mx:max price by sym from trade where date={D0}"},
-    {"id": "Q13", "q": "How many stopped trades on {D0}?", "truth": "select s:sum `long$stop from trade where date={D0}"},
-    {"id": "Q14", "q": "Standard deviation of trade price by symbol on {D0}?", "truth": "select d:dev price by sym from trade where date={D0}"},
-    {"id": "Q15", "q": "Average bid size vs average ask size on {D0}?", "truth": "select ab:avg bsize, aa:avg asize from quote where date={D0}"},
-    {"id": "Q16", "q": "Total volume across {D0} and {D1}?", "truth": "select v:sum `long$size from trade where date in ({D0};{D1})"},
-    {"id": "Q17", "q": "Which symbols traded on {D0} but did not quote on {D0}?", "truth": "(select distinct sym from trade where date={D0}) except select distinct sym from quote where date={D0}"},
-    {"id": "Q18", "q": "How many trades larger than 5000 shares on {D0}?", "truth": "count select from trade where date={D0}, size>5000"},
-    {"id": "Q19", "q": "Median trade price on {D0}?", "truth": "select m:med price from trade where date={D0}"},
-    {"id": "Q20", "q": "Average trade price by exchange on {D0}?", "truth": "select a:avg price by ex from trade where date={D0}"},
-    {"id": "Q21", "q": "Top 5 symbols by traded notional on {D0}.", "truth": "5 sublist `notional xdesc select notional:sum price*size by sym from trade where date={D0}"},
-    {"id": "Q22", "q": "Variance of trade size on {D0}.", "truth": "select v:var size from trade where date={D0}"},
-
-    {"_comment_hard": "shapes that probe grammar limits — truth=null (served-but-not-checked); if rejected they are uncoverable findings",
-     "id": "Q23", "q": "1-hour trade-count bars through {D0}.", "truth": null},
-    {"id": "Q24", "q": "For AAPL trades on {D0}, the prevailing quote mid at trade time (as-of join).", "truth": null},
-    {"id": "Q25", "q": "Running cumulative traded volume through {D0} for the busiest symbol.", "truth": null}
+    {
+      "id": "Q01",
+      "q": "How many trades happened on {D0}?",
+      "truth": "select n:count i from trade where date={D0}"
+    },
+    {
+      "id": "Q02",
+      "q": "What was the highest trade price on {D0}?",
+      "truth": "select max price from trade where date={D0}"
+    },
+    {
+      "id": "Q03",
+      "q": "Total traded volume (sum of size) on {D0}?",
+      "truth": "select v:sum `long$size from trade where date={D0}"
+    },
+    {
+      "id": "Q04",
+      "q": "How many distinct symbols traded on {D0}?",
+      "truth": "select n:count distinct sym from trade where date={D0}"
+    },
+    {
+      "id": "Q05",
+      "q": "Average trade size on {D0}?",
+      "truth": "select avg size from trade where date={D0}"
+    },
+    {
+      "id": "Q06",
+      "q": "Trade count per exchange on {D0}?",
+      "truth": "select count i by ex from trade where date={D0}"
+    },
+    {
+      "id": "Q07",
+      "q": "Volume-weighted average price by symbol on {D0}?",
+      "truth": "select size wavg price by sym from trade where date={D0}"
+    },
+    {
+      "id": "Q08",
+      "q": "Buy vs sell trade counts on {D0}?",
+      "truth": "select count i by side from trade where date={D0}"
+    },
+    {
+      "id": "Q09",
+      "q": "Total traded notional (sum price*size) by symbol on {D0}?",
+      "truth": "select v:sum price*size by sym from trade where date={D0}"
+    },
+    {
+      "id": "Q10",
+      "q": "How many quotes on {D0}?",
+      "truth": "select n:count i from quote where date={D0}"
+    },
+    {
+      "id": "Q11",
+      "q": "Average bid/ask spread on {D0}?",
+      "truth": "select s:avg ask-bid from quote where date={D0}"
+    },
+    {
+      "id": "Q12",
+      "q": "Min and max trade price per symbol on {D0}?",
+      "truth": "select mn:min price, mx:max price by sym from trade where date={D0}"
+    },
+    {
+      "id": "Q13",
+      "q": "How many stopped trades on {D0}?",
+      "truth": "select s:sum `long$stop from trade where date={D0}"
+    },
+    {
+      "id": "Q14",
+      "q": "Standard deviation of trade price by symbol on {D0}?",
+      "truth": "select d:dev price by sym from trade where date={D0}"
+    },
+    {
+      "id": "Q15",
+      "q": "Average bid size vs average ask size on {D0}?",
+      "truth": "select ab:avg bsize, aa:avg asize from quote where date={D0}"
+    },
+    {
+      "id": "Q16",
+      "q": "Total volume across {D0} and {D1}?",
+      "truth": "select v:sum `long$size from trade where date in ({D0};{D1})"
+    },
+    {
+      "id": "Q17",
+      "q": "Which symbols traded on {D0} but did not quote on {D0}?",
+      "truth": "(select distinct sym from trade where date={D0}) except select distinct sym from quote where date={D0}"
+    },
+    {
+      "id": "Q18",
+      "q": "How many trades larger than 5000 shares on {D0}?",
+      "truth": "select n:count i from trade where date={D0}, size>5000"
+    },
+    {
+      "id": "Q19",
+      "q": "Median trade price on {D0}?",
+      "truth": "select m:med price from trade where date={D0}"
+    },
+    {
+      "id": "Q20",
+      "q": "Average trade price by exchange on {D0}?",
+      "truth": "select a:avg price by ex from trade where date={D0}"
+    },
+    {
+      "id": "Q21",
+      "q": "Top 5 symbols by traded notional on {D0}.",
+      "truth": "5 sublist `notional xdesc select notional:sum price*size by sym from trade where date={D0}"
+    },
+    {
+      "id": "Q22",
+      "q": "Variance of trade size on {D0}.",
+      "truth": "select v:var size from trade where date={D0}"
+    },
+    {
+      "_comment_hard": "shapes that probe grammar limits \u2014 truth=null (served-but-not-checked); if rejected they are uncoverable findings",
+      "id": "Q23",
+      "q": "1-hour trade-count bars through {D0}.",
+      "truth": null
+    },
+    {
+      "id": "Q24",
+      "q": "For AAPL trades on {D0}, the prevailing quote mid at trade time (as-of join).",
+      "truth": null
+    },
+    {
+      "id": "Q25",
+      "q": "Running cumulative traded volume through {D0} for the busiest symbol.",
+      "truth": null
+    }
   ]
 }
