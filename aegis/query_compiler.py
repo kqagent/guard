@@ -322,11 +322,15 @@ class QueryCompiler:
                     self._reject(f"unsafe like pattern: {val!r}")
                 preds.append(f'{col} like "{val}"')
 
-        # SCAN cap (always) — partition-safe `i<max_rows`. This bounds rows READ
-        # from disk (resource protection). The RESULT-shaping `limit` is applied
-        # separately, wrap-safely, via `sublist` in _compile_select.
-        preds.append(f"i<{self.max_rows}")
-        return " where " + ", ".join(preds)
+        # NB: the row cap is NOT applied here as a scan predicate. A `where i<N`
+        # bounds the rows the SELECT sees — correct for raw-row output, but it
+        # silently CORRUPTS aggregations (count/sum/avg would see only the first N
+        # rows). Found at 500M-row scale via ground-truth checking: `count` returned
+        # the cap (1e6) not the true count (1e7). The cap is therefore a RESULT-row
+        # bound applied via `sublist` in _compile_select (after any aggregation),
+        # which is correct for every shape. The scan itself is already bounded to a
+        # single date partition by the required date filter above.
+        return (" where " + ", ".join(preds)) if preds else ""
 
     # -- top-level forms ---------------------------------------------------
 
@@ -374,12 +378,16 @@ class QueryCompiler:
                 self._reject(f"sort dir must be asc/desc, got {direction!r}")
             xf = "xdesc" if direction == "desc" else "xasc"
             base = f"`{scol} {xf} ({base})"
+        # RESULT-row cap (always): `N sublist` the final result — bounds the rows
+        # returned to the agent WITHOUT corrupting any aggregation (sublist takes
+        # the first N of the RESULT, after grouping/aggregation). An explicit
+        # caller limit is honoured but never allowed to exceed max_rows.
         limit = req.get("limit")
-        if limit is not None:
-            if not isinstance(limit, int) or limit <= 0:
-                self._reject(f"invalid limit: {limit!r}")
-            base = f"{min(limit, self.max_rows)} sublist {base if sort is not None else '(' + base + ')'}"
-        return base
+        if limit is not None and (not isinstance(limit, int) or limit <= 0):
+            self._reject(f"invalid limit: {limit!r}")
+        eff = min(limit, self.max_rows) if isinstance(limit, int) else self.max_rows
+        wrapped = base if base.startswith("`") else f"({base})"  # sort already parenthesised
+        return f"{eff} sublist {wrapped}"
 
     def _compile_setop(self, req: dict) -> str:
         op = req.get("setop")
