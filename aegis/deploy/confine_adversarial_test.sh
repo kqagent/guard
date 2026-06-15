@@ -67,14 +67,20 @@ out="$(run 'for p in /policy/policy.json /policy/policy.kdb.json; do echo x > $p
 echo "$out" | grep -q WROTE && no "policy read-only" "wrote policy" \
   || ok "policy dir read-only (agent cannot edit its own guardrails)"
 
-# seccomp-bpf innermost layer: a dangerous syscall (unshare) is killed by the
+# seccomp-bpf innermost layer: a dangerous syscall (unshare, 272) is killed by the
 # kernel even though the agent reached the call. Skip the assertion (don't fail)
 # where python3 isn't in the sandbox to install the filter.
+#
+# Verdict ORDER matters: a killed syscall makes the shell print a job-control
+# message that ECHOES THE COMMAND LINE — which literally contains the string
+# `print("SURVIVED")`. So we must test the SIGSYS signature FIRST; only if the
+# syscall was NOT killed (no "bad system call") do we treat a SURVIVED print as a
+# real bypass. (Checking SURVIVED first false-fails on the echoed command text.)
 out="$(run 'command -v python3 >/dev/null && python3 -c "import ctypes,ctypes.util as u; l=ctypes.CDLL(u.find_library(\"c\")); l.syscall.restype=ctypes.c_long; l.syscall(ctypes.c_long(272), ctypes.c_long(0x10000000)); print(\"SURVIVED\")" 2>&1; echo END')"
-if echo "$out" | grep -q SURVIVED; then
-  no "seccomp blocks a dangerous syscall" "unshare survived inside the sandbox"
-elif echo "$out" | grep -qiE 'bad system call|SIGSYS'; then
+if echo "$out" | grep -qiE 'bad system call|SIGSYS'; then
   ok "seccomp-bpf killed a blocked syscall (unshare) inside the sandbox"
+elif echo "$out" | grep -q SURVIVED; then
+  no "seccomp blocks a dangerous syscall" "unshare survived inside the sandbox"
 else
   echo "  SKIP  seccomp assertion (no python3 in sandbox to install/exercise the filter)"
 fi
