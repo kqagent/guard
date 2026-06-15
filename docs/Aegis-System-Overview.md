@@ -225,6 +225,12 @@ Aegis is validated by deterministic, runnable proofs - not assertions.
 - The free-form (raw-q) surface still exists as **admin-only break-glass**,
   separately signed, never granted to an analyst; it rests on the denylist +
   confinement and is honestly weaker than the structured surface.
+- **Numeric overflow is the model's, not the gate's.** q `sum` over a 64-bit
+  integer column wraps silently; the compiler bounds *which rows* are read and
+  *which result size* is returned, but it does not widen aggregations, so a sum
+  over a very large integer column can overflow to a wrong number. This is a
+  correctness property of q, not a safety bound; it is asserted and surfaced by
+  the q-semantics conformance battery (`aegis.q_conformance_test`, P7).
 
 ---
 
