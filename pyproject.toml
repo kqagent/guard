@@ -40,8 +40,9 @@ formal = ["z3-solver>=4.13"]     # SMT proofs over unbounded domains (aegis.form
 agent = ["anthropic>=0.40"]      # LLM overseer + live kdb agent (advisory layers; core never imports it)
 benchmarks = ["agentdojo>=0.1", "anthropic>=0.40"]  # official AgentDojo run
 deploy = ["pyyaml>=6"]           # verify_deployment.py manifest parsing
+docs = ["reportlab>=4"]          # tools/build_overview_pdf.py (the system-overview PDF)
 # Everything a maintainer/CI needs in one shot.
-dev = ["aegis-guardrails[signing,formal,deploy]", "ruff>=0.4"]
+dev = ["aegis-guardrails[signing,formal,deploy,docs]", "ruff>=0.4"]
 
 [project.scripts]
 aegis-pdp = "aegis.pdp_service:main"          # run the out-of-process PDP sidecar
