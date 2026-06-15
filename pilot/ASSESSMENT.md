@@ -21,6 +21,11 @@ the real numbers. Written to be shown to a control function without overselling.
 | **Break-glass separation** | Free-form `run_query` admin-only, analyst-unreachable, audited | ✅ analyst blocked on both policies; admin-only via rbac; dangerous q still blocked | `breakglass_test`; `BREAK_GLASS.md` |
 | **Policy authoring kit** | Control function can author/validate/sign without engineering | ✅ template + `policy_lint` validator (self-tested) + guide | `policy_lint_test`; `POLICY_AUTHORING_KIT.md` |
 | **Window-join (wj)** | Boundary decision (1/52 shape) | ⚪ **documented + skipped** (not shipped; revisit conditions recorded) | `WINDOW_JOIN_BOUNDARY.md` |
+| **Realism: scale** | Real schema at production scale | ✅ **4B rows** (4 FSP × 500M trade + 500M quote), partitioned, enumerated sym, p# | `REALISM_METHODOLOGY.md` |
+| **Realism: correctness** | Served-and-correct vs independent ground truth | ✅ Opus **20/22 (0.91)**, Haiku 0.83, Sonnet 0.57 — misses are model query-formulation, NOT guardrail; q-side value compare | `REALISM_RESULTS.md`, `rescore.py` |
+| **Realism: uncoop attacker** | Gate recall, model conscience removed | ✅ **attack-success 0/30** (0 refused, 27 inexpressible, 3 blocked) + 0/30 direct-to-gate | `adversarial_soak.py` |
+| **Realism: no hints** | Schema discovered, not fed | ✅ column allowlist from `meta`; model used `op:meta`; production tool desc only | `realism_soak.py` |
+| **Realism: compiler bug found+fixed** | Correctness at scale | ✅ scan-cap corrupted aggregations (count 1M≠10M) — **found by ground truth, fixed** (result-bound sublist) | `query_compiler.py` |
 
 ## The two numbers that decide it
 
