@@ -46,6 +46,7 @@ CORE = [
     ("overseer_wiring_test", "overseer wired advisory-only: narrative attached, gate identical, no allow/clear path"),
     ("policy_lint_test", "policy authoring validator: catches malformed control-function policies"),
     ("policy_schema_diff_test", "policy-vs-schema drift linter: too-tight (lockout) + too-loose (scan) drift"),
+    ("ifc_test", "information-flow control: untrusted tool output can't drive a privileged sink (prompt-injection)"),
 ]
 OPTIONAL = [
     ("verify_kdb_bridge", "bridges this repo's tools/gate.js (needs Node)"),
