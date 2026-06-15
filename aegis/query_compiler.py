@@ -322,15 +322,47 @@ class QueryCompiler:
                     self._reject(f"unsafe like pattern: {val!r}")
                 preds.append(f'{col} like "{val}"')
 
-        # NB: the row cap is NOT applied here as a scan predicate. A `where i<N`
-        # bounds the rows the SELECT sees — correct for raw-row output, but it
-        # silently CORRUPTS aggregations (count/sum/avg would see only the first N
-        # rows). Found at 500M-row scale via ground-truth checking: `count` returned
-        # the cap (1e6) not the true count (1e7). The cap is therefore a RESULT-row
-        # bound applied via `sublist` in _compile_select (after any aggregation),
-        # which is correct for every shape. The scan itself is already bounded to a
-        # single date partition by the required date filter above.
+        # MATERIALISATION bound, shape-aware. A `where ..., i<N` bounds the rows the
+        # select reads off disk — but it CORRUPTS a reducing query (count/sum/avg/
+        # grouped/distinct see only the first N rows; found at 500M scale: `count`
+        # returned the cap 1e6, not 1e7). And `N sublist (select ...)` does NOT bound
+        # materialisation — proven on real kdb+: it reads the whole match (same space
+        # as the uncapped select) then takes N. So:
+        #   * RAW row-listing  -> apply `i<N` here: bounds what's read AND is the
+        #     correct first-N semantics. Without it, one date partition (tens of
+        #     millions of rows at scale) is fully materialised on the gateway per
+        #     query — a resource/DoS vector the `N sublist` result-cap does not stop.
+        #   * REDUCING query (aggs/by/distinct/agg-expr) -> NO `i<N` (would corrupt);
+        #     it must read its input, bounded to one partition by the date filter,
+        #     and its small result is capped by `N sublist` in _compile_select.
+        if not self._reduces(req):
+            preds.append(f"i<{self.max_rows}")
         return (" where " + ", ".join(preds)) if preds else ""
+
+    @staticmethod
+    def _expr_has_agg(node) -> bool:
+        """True if a select-expr AST contains an aggregation node (so the query
+        reduces and a row-scan cap would corrupt it)."""
+        if not isinstance(node, dict):
+            return False
+        if "agg" in node:
+            return True
+        if "op" in node:
+            args = node.get("args")
+            return isinstance(args, list) and any(QueryCompiler._expr_has_agg(a) for a in args)
+        if "win" in node:
+            return QueryCompiler._expr_has_agg(node.get("arg"))
+        return False
+
+    def _reduces(self, req: dict) -> bool:
+        """Does this query reduce its input (aggregate / group / distinct)?
+        If so, an `i<N` scan cap would give a wrong answer and must be omitted."""
+        if req.get("aggs") or req.get("by") or req.get("distinct"):
+            return True
+        for item in (req.get("select") or []):
+            if isinstance(item, dict) and self._expr_has_agg(item.get("expr")):
+                return True
+        return False
 
     # -- top-level forms ---------------------------------------------------
 
