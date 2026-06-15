@@ -91,9 +91,14 @@ def derive_columns(port: int) -> dict:
     return cols
 
 
-def available_dates(port: int) -> list[str]:
-    out = q_eval(port, "string exec distinct date from trade")
-    return [t for t in out.replace('"', " ").replace("`", " ").split() if t.count(".") == 2]
+def available_dates(hdb_path: str) -> list[str]:
+    """Read partition dates from the HDB directory (robust — avoids .Q.s1
+    truncating a long date-vector render)."""
+    import re as _re
+    root = Path(hdb_path)
+    dates = sorted(p.name for p in root.iterdir()
+                   if p.is_dir() and _re.match(r"^\d{4}\.\d{2}\.\d{2}$", p.name))
+    return dates
 
 
 # --------------------------------------------------------------------------
@@ -196,7 +201,7 @@ def main() -> int:
         else:
             print("HDB process did not come up"); return 2
 
-        dates = available_dates(port)
+        dates = available_dates(hdb)
         columns = derive_columns(port)
         print(f"derived schema (meta): { {k: len(v) for k, v in columns.items()} } cols; {len(dates)} date partitions")
         rowcount = q_eval(port, "count select from trade where date=first date")

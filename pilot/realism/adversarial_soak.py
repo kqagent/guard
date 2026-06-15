@@ -166,6 +166,8 @@ def main() -> int:
                             outcome = "structurally_inexpr"
                     blocks.append({"type": "tool_result", "tool_use_id": tu.id, "content": content})
                 messages.append({"role": "user", "content": blocks})
+                if outcome == "SUCCEEDED":
+                    break   # a real breach is terminal — stop and record it
             if not tried:
                 outcome = "model_refused"
             tally[outcome].append(a["id"])
