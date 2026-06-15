@@ -75,25 +75,47 @@ class QueryCompiler:
         self.columns = {k.lower(): {col.lower() for col in v}
                         for k, v in c.get("columns", {}).items()}
         self.agg_fns = set(c.get("agg_fns", _DEFAULT_AGGS))
+        # Raw-select date-range cap: a raw row-listing whose date range spans more
+        # than this many partitions is rejected (bounds materialisation globally,
+        # since a raw listing materialises up to max_rows per partition). Reducing
+        # queries are unaffected. 0/absent => no span cap.
+        self.max_partition_span = int(c.get("max_partition_span", 0) or 0)
+        # Row-level entitlements (mandatory, non-removable per-principal row filter).
+        # mode: "open" (default — absence means no row filter) or "default_deny"
+        # (a principal with no entry for a queried table is rejected — sees nothing).
+        ent = c.get("entitlements") or {}
+        self.ent_mode = ent.get("mode", "open")
+        # {principal -> {table-or-"*" -> [filter-dict, ...]}}; table keys lowercased.
+        self.ent_principals = {
+            p: {(t.lower() if t != "*" else "*"): fs for t, fs in (rule.get("row_filters") or {}).items()}
+            for p, rule in (ent.get("principals") or {}).items()
+        }
 
     @classmethod
     def from_policy(cls, policy_path: str | Path = None) -> "QueryCompiler":
         policy_path = policy_path or Path(__file__).with_name("policy.json")
         cfg = json.loads(Path(policy_path).read_text(encoding="utf-8"))
-        return cls(cfg.get("query_proxy", {}))
+        qp = dict(cfg.get("query_proxy", {}))
+        if "entitlements" in cfg:          # entitlements is a top-level policy block
+            qp["entitlements"] = cfg["entitlements"]
+        return cls(qp)
 
     # -- public ------------------------------------------------------------
 
-    def compile(self, request: dict) -> str:
-        """Compile a structured request to safe bounded q, or raise."""
+    def compile(self, request: dict, principal: str | None = None) -> str:
+        """Compile a structured request to safe bounded q, or raise.
+
+        `principal` is the authenticated identity from the PDP/action — the agent
+        cannot set it. Under row-level entitlements it selects the mandatory,
+        non-removable row filter ANDed into every table reference."""
         if not isinstance(request, dict):
             raise StructuredQueryRejected("request must be an object")
         if "join" in request:
-            out = self._compile_join(request["join"])
+            out = self._compile_join(request["join"], principal)
         elif "setop" in request:
-            out = self._compile_setop(request)
+            out = self._compile_setop(request, principal)
         else:
-            out = self._compile_select(request)
+            out = self._compile_select(request, principal)
         return self._backstop(out)
 
     # -- validation helpers ------------------------------------------------
@@ -274,7 +296,62 @@ class QueryCompiler:
             clauses.append(self._col(c, cols_allowed))
         return (" by " + ", ".join(clauses)) if clauses else ""
 
-    def _where_expr(self, req: dict, table: str, cols_allowed: set) -> str:
+    def _filter_pred(self, f: dict, cols_allowed: set) -> str:
+        """Compile ONE structured filter to a q predicate. Column goes through the
+        allowlist (`_col`); values through the injection-safe scalar path
+        (`_scalar`). Used for BOTH the agent's own filters and the mandatory
+        entitlement filters — so an entitlement value can no more inject than a
+        user value can."""
+        if not isinstance(f, dict):
+            self._reject("each filter must be an object")
+        col = self._col(f.get("col"), cols_allowed)
+        op = f.get("op")
+        if op not in _FILTER_OPS:
+            self._reject(f"filter op '{op}' not allowed")
+        val = f.get("value")
+        if op in _SCALAR_OPS:
+            return f"{col}{op}{self._scalar(val)}"
+        if op == "in":
+            if not isinstance(val, list) or not val:
+                self._reject("'in' requires a non-empty list")
+            items = [self._scalar(v) for v in val]
+            # symbols concat without separators (`A`B); others use (a;b)
+            return f"{col} in {''.join(items)}" if all(s.startswith("`") for s in items) \
+                else f"{col} in ({';'.join(items)})"
+        if op == "within":
+            if not isinstance(val, list) or len(val) != 2:
+                self._reject("'within' requires [lo, hi]")
+            return f"{col} within ({self._scalar(val[0])};{self._scalar(val[1])})"
+        if op == "like":
+            if not isinstance(val, str) or not _LIKE.match(val):
+                self._reject(f"unsafe like pattern: {val!r}")
+            return f'{col} like "{val}"'
+        self._reject(f"filter op '{op}' not allowed")
+
+    def _entitlement_preds(self, principal, table: str, cols_allowed: set) -> list[str]:
+        """MANDATORY per-principal row filter for `table`. Returns predicate
+        strings to be ANDed (non-removably) into the WHERE clause of EVERY table
+        reference. The agent cannot set `principal`, cannot remove these, and
+        cannot widen past them (they AND with its own filters -> intersection).
+        Fail-closed under default_deny; no-op under open mode (default)."""
+        if self.ent_mode != "default_deny" and not self.ent_principals:
+            return []   # entitlements not configured -> no row filter (back-compat)
+        rule = self.ent_principals.get(principal)
+        if rule is None:
+            if self.ent_mode == "default_deny":
+                self._reject(f"principal {principal!r} has no row entitlements (default-deny) — denied")
+            return []
+        filters = rule.get(table.lower())
+        if filters is None:
+            filters = rule.get("*")
+        if filters is None:
+            if self.ent_mode == "default_deny":
+                self._reject(f"principal {principal!r} has no row entitlement for table '{table}' (default-deny) — denied")
+            return []
+        # Compile each entitlement filter through the SAME injection-safe path.
+        return [self._filter_pred(f, cols_allowed) for f in self._list(filters, "entitlement row_filters")]
+
+    def _where_expr(self, req: dict, table: str, cols_allowed: set, principal=None) -> str:
         preds = []
         # date predicate (required for partitioned tables)
         date = req.get("date")
@@ -292,35 +369,16 @@ class QueryCompiler:
         elif table.lower() in self.require_date_tables:
             self._reject(f"table '{table}' is partitioned — a date range is required")
 
-        # structured filters
+        # structured filters (the agent's own)
         for f in self._list(req.get("filters", []) or [], "filters"):
-            if not isinstance(f, dict):
-                self._reject("each filter must be an object")
-            col = self._col(f.get("col"), cols_allowed)
-            op = f.get("op")
-            if op not in _FILTER_OPS:
-                self._reject(f"filter op '{op}' not allowed")
-            val = f.get("value")
-            if op in _SCALAR_OPS:
-                preds.append(f"{col}{op}{self._scalar(val)}")
-            elif op == "in":
-                if not isinstance(val, list) or not val:
-                    self._reject("'in' requires a non-empty list")
-                items = [self._scalar(v) for v in val]
-                # symbols concat without separators (`A`B); others use (a;b)
-                if all(s.startswith("`") for s in items):
-                    preds.append(f"{col} in {''.join(items)}")
-                else:
-                    preds.append(f"{col} in ({';'.join(items)})")
-            elif op == "within":
-                if not isinstance(val, list) or len(val) != 2:
-                    self._reject("'within' requires [lo, hi]")
-                lo, hi = self._scalar(val[0]), self._scalar(val[1])
-                preds.append(f"{col} within ({lo};{hi})")
-            elif op == "like":
-                if not isinstance(val, str) or not _LIKE.match(val):
-                    self._reject(f"unsafe like pattern: {val!r}")
-                preds.append(f'{col} like "{val}"')
+            preds.append(self._filter_pred(f, cols_allowed))
+
+        # MANDATORY row-level entitlement predicate(s) — ANDed in, non-removable.
+        # Injected for EVERY table reference (this method is the single chokepoint
+        # for top-level selects AND both sides of joins/setops), so the agent can
+        # never reach a row outside its set, including via a join, setop, computed
+        # column, or a contradictory filter of its own (predicates AND -> intersection).
+        preds.extend(self._entitlement_preds(principal, table, cols_allowed))
 
         # MATERIALISATION bound, shape-aware. A `where ..., i<N` bounds the rows the
         # select reads off disk — but it CORRUPTS a reducing query (count/sum/avg/
@@ -381,16 +439,37 @@ class QueryCompiler:
             out.add(str(b["as"]).lower())
         return out
 
-    def _compile_select(self, req: dict) -> str:
+    def _max_span_check(self, req: dict, table: str) -> None:
+        """Raw-select date-range cap: a RAW row-listing whose date range spans more
+        than max_partition_span days is rejected — bounds materialisation globally
+        (a raw listing reads up to max_rows PER partition). Reducing queries
+        (aggs/by/distinct) are exempt: they must read their input and their result
+        is already result-capped."""
+        if not self.max_partition_span or self._reduces(req):
+            return
+        date = req.get("date")
+        if not isinstance(date, dict):
+            return
+        d_from, d_to = date.get("from"), date.get("to")
+        if not (d_from and d_to) or not (_DATE.match(d_from) and _DATE.match(d_to)):
+            return
+        from datetime import date as _d
+        span = (_d(*map(int, d_to.split("."))) - _d(*map(int, d_from.split("."))))
+        if span.days + 1 > self.max_partition_span:
+            self._reject(f"raw row-listing date range spans {span.days + 1} days "
+                         f"(max {self.max_partition_span}) — narrow the range or use an aggregation")
+
+    def _compile_select(self, req: dict, principal=None) -> str:
         table = self._table(req.get("table"))
         if req.get("op") == "meta":
             return f"meta {table}"
         cols_allowed = self._cols_for(table)
+        self._max_span_check(req, table)
         sel_list, _ = self._select_list(req, cols_allowed)
         sel = sel_list if sel_list is not None else self._select_expr(req, cols_allowed)
         distinct = "distinct " if req.get("distinct") else ""
         by = self._by_expr(req, cols_allowed)
-        where = self._where_expr(req, table, cols_allowed)
+        where = self._where_expr(req, table, cols_allowed, principal)
         base = f"select {distinct}{sel}{by} from {table}{where}".replace("select  ", "select ")
 
         # Result shaping: optional sort + top/first-N, applied OUTSIDE the scan.
@@ -421,16 +500,17 @@ class QueryCompiler:
         wrapped = base if base.startswith("`") else f"({base})"  # sort already parenthesised
         return f"{eff} sublist {wrapped}"
 
-    def _compile_setop(self, req: dict) -> str:
+    def _compile_setop(self, req: dict, principal=None) -> str:
         op = req.get("setop")
         if op not in ("except", "union", "inter"):
             self._reject(f"setop '{op}' not supported (except/union/inter)")
         left, right = req.get("left"), req.get("right")
         if not isinstance(left, dict) or not isinstance(right, dict):
             self._reject("setop requires 'left' and 'right' structured requests")
-        return f"({self._compile_select(left)}) {op} ({self._compile_select(right)})"
+        # Each side compiled via _compile_select -> carries ITS table's entitlement.
+        return f"({self._compile_select(left, principal)}) {op} ({self._compile_select(right, principal)})"
 
-    def _compile_join(self, join: dict) -> str:
+    def _compile_join(self, join: dict, principal=None) -> str:
         if not isinstance(join, dict):
             self._reject("join must be an object")
         jtype = join.get("type")
@@ -447,8 +527,10 @@ class QueryCompiler:
         for c in on:                       # join keys must be allowlisted on BOTH tables
             if c.lower() not in lcols or c.lower() not in rcols:
                 self._reject(f"join key '{c}' not allowlisted on both tables")
-        lsel = self._compile_select(left)
-        rsel = self._compile_select(right)
+        # Each side compiled via _compile_select -> carries ITS table's entitlement
+        # predicate, so a join can never surface a row either side isn't entitled to.
+        lsel = self._compile_select(left, principal)
+        rsel = self._compile_select(right, principal)
         keys = "".join("`" + c for c in on)
 
         if jtype == "left":
