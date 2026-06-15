@@ -145,7 +145,10 @@ def run() -> int:
         t0 = time.monotonic()
         inc = _drive_to_trip(sup)                # trips + dispatches the slow overseer
         elapsed = time.monotonic() - t0
-        ok_e = inc is not None and elapsed < 1.0  # 10s of overseer sleep must NOT be awaited
+        # The overseer sleeps 10s total; observe() must return WITHOUT awaiting it.
+        # Threshold is generous (not <1s) so the assertion can't flake on a loaded
+        # shared box — 3s still cleanly distinguishes "didn't await" from the 10s wait.
+        ok_e = inc is not None and elapsed < 3.0  # 10s of overseer sleep must NOT be awaited
         print(f"  {'ok ' if ok_e else 'XX '} (e) observe() returns in {elapsed*1000:.0f}ms despite a 10s-blocking overseer "
               f"(decision path is OFF the LLM critical path)")
         fails += 0 if ok_e else 1
