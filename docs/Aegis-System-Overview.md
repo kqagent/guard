@@ -1,8 +1,9 @@
 # Aegis - System Overview
 
 *Honest technical overview. Working name "Aegis". A deterministic, fail-closed
-policy gate for deploying LLM agents on production kdb+/q estates. Generated to
-`docs/Aegis-System-Overview.pdf` via `tools/build_overview_pdf.py`.*
+policy gate for deploying LLM agents on production kdb+/q estates. Revised
+2026-06-15. Generated to `docs/Aegis-System-Overview.pdf` via
+`tools/build_overview_pdf.py`.*
 
 ---
 
@@ -19,8 +20,9 @@ English, automation around the estate). The danger is equally real:
   overwrite the sym file (silently corrupting every symbol column), open network
   connections, or exfiltrate client positions and P&L.
 - An LLM is non-deterministic and **promptable by its own inputs**. A
-  prompt-injection delivered through a tool result can make a well-aligned model
-  emit a harmful action.
+  prompt-injection delivered through a tool result - a poisoned news field, a
+  planted file, an MCP response - can make a well-aligned model emit a harmful
+  action.
 
 **Why the obvious defenses don't work.** Anything in the model's prompt
 ("you must not delete data") is *advice* - the model attends to it
@@ -51,9 +53,20 @@ whether each action happens. Principles:
    data) that Aegis **compiles** into bounded, allowlisted q. Dangerous
    operations have **no slot in the grammar** - they are *structurally
    impossible to express*, not detected-and-blocked.
-5. **Confinement is load-bearing; the gate is defense-in-depth.** The kdb+
-   process runs non-root, read-only HDB, no shell, no network egress - so even a
-   hypothetical gate bypass cannot delete data or reach the network.
+5. **Rows are governed, not just tables.** A mandatory, non-removable
+   per-principal **row filter** is injected into every compiled query, so an
+   analyst sees only the rows their entitlement allows - even through joins and
+   set operations, and even if they explicitly ask for rows outside their set.
+6. **Provenance decides privilege (the injection defense).** Every piece of
+   content the agent sees is labelled trusted or untrusted; **untrusted content
+   can never drive a privileged action** (a trade, an email, a write, an egress).
+   The injection does not have to be *detected* - it simply cannot reach a
+   trigger. This is information-flow control, the deterministic answer to prompt
+   injection.
+7. **Confinement is load-bearing; the gate is defense-in-depth.** The kdb+
+   process runs non-root, read-only HDB, no shell, no network egress, and under
+   a syscall filter - so even a hypothetical gate bypass cannot delete data,
+   reach the network, or attack the kernel.
 
 ---
 
@@ -66,13 +79,18 @@ covers, on the kdb+ analyst surface:
 2. Destroying or corrupting data on disk (HDB partitions, the sym file)
 3. Mutating the live data (delete/insert/update)
 4. Stealing sensitive / client data (positions, P&L, account_no, salary)
-5. Reaching outside its lane (non-allowlisted tables, the production HDB)
+5. Reaching outside its lane (non-allowlisted tables, columns, or **rows** the
+   principal is not entitled to)
 6. Exfiltration & remote code (outbound connections, native shared-object load)
 7. Hijacking the process itself (message-handler replacement, `exit`)
 8. Resource exhaustion / DoS (unbounded scans that degrade the box)
 9. Reading protected files (the policy, password lists, the audit log)
 10. Evasion / injection (obfuscation, dynamic eval, injection through the
     structured API's own fields)
+11. **Indirect prompt injection** - a malicious instruction hidden in a tool
+    result (a file, a query's free-text field, a web/MCP response) that tries to
+    drive the agent to a privileged action. Stopped by information-flow control:
+    untrusted-derived actions cannot reach a privileged sink.
 
 ---
 
@@ -80,16 +98,17 @@ covers, on the kdb+ analyst surface:
 
 ```mermaid
 flowchart TB
-    subgraph CONF["OS confinement - load-bearing (non-root, read-only HDB, no shell, no egress; Landlock + namespaces)"]
+    subgraph CONF["OS confinement - load-bearing (non-root, read-only HDB, no shell, no egress; namespaces + Landlock + seccomp-bpf)"]
         AGENT["LLM Agent - any model<br/>(Claude / GPT / Bedrock / local)"]
         AGENT -- "tool call: STRUCTURED request<br/>(never raw q)" --> PDP
         subgraph PDP["Policy Decision Point (PDP) - out-of-process, Ed25519-signed policy, FAIL-CLOSED"]
             direction LR
-            QC["Query Compiler<br/>structured → bounded,<br/>allowlisted q"]
+            QC["Query compiler<br/>structured → bounded q<br/>+ mandatory row entitlements"]
+            IFC["Information-flow control<br/>untrusted input can't<br/>drive a privileged sink"]
             DET["Detector packs<br/>secrets · PII · destructive ·<br/>prod · resource · MCP"]
             EG["Egress proxy<br/>host allowlist · SSRF ·<br/>payload DLP"]
         end
-        PDP -- "only safe, bounded,<br/>allowlisted actions execute" --> SYS
+        PDP -- "only safe, bounded,<br/>entitled actions execute" --> SYS
     end
     SYS["Production systems<br/>kdb+ HDB & gateways · network"]
 
@@ -97,7 +116,7 @@ flowchart TB
     PDP -. "decision stream" .-> SUP["Supervisor + circuit-breaker<br/>KILL SWITCH (deterministic)"]
     SUP -. "incident (advisory)" .-> OV["LLM overseer<br/>reads logs, narrates<br/>(advisory, never gates)"]
 
-    CTRL["Control function<br/>authors + signs policy"] -- "signed policy bundle<br/>(read-only mount)" --> PDP
+    CTRL["Control function<br/>authors + signs policy"] -- "signed policy bundle<br/>(monotonic-confinement checked,<br/>read-only mount)" --> PDP
 ```
 
 **Component summary**
@@ -106,13 +125,23 @@ flowchart TB
 |---|---|---|
 | **PDP** (`engine`, `pdp_service`) | decides every action against the signed policy | out-of-process, fail-closed |
 | **Query compiler** (`query_compiler`) | compiles structured requests → bounded q | injection structurally impossible |
+| **Row entitlements** (`query_compiler`) | mandatory per-principal row filter, ANDed into every table reference | non-removable, can't widen, covers joins/setops |
+| **Information-flow control** (`ifc`) | untrusted-labelled content can't reach a privileged sink | deterministic prompt-injection defense |
 | **Detector packs** (`detectors`) | veto on secrets/PII/destructive/prod/resource/MCP | deterministic, defense-in-depth |
 | **Egress proxy** (`egress_proxy`) | network egress control | host allowlist + SSRF + payload DLP |
 | **Signing** (`signing`) | Ed25519-signed policy; agent can't forge | integrity / non-repudiation |
+| **Policy-change guard** (`monotonic_confinement`) | a policy edit may only narrow the allow-set without approval | widening needs explicit sign-off |
+| **Schema-drift linter** (`policy_schema_diff`) | diffs the signed policy vs the live schema | catches lockout + unbounded-scan drift |
 | **WORM audit** (`audit`, `worm_sinks`) | tamper-evident record of every decision | hash-chain + mirror + anchor |
 | **Supervisor + kill switch** (`supervisor`) | trips a breaker + kills on behavioural tripwires | deterministic, load-bearing |
 | **LLM overseer** (`overseer`) | reads the audit, narrates incidents | advisory only, never gates, out-of-band |
-| **OS confinement** (`deploy/`) | the containment boundary | kernel-enforced (Landlock + namespaces) |
+| **OS confinement** (`deploy/`) | the containment boundary | namespaces + Landlock + seccomp, kernel-enforced |
+
+The controls span **three planes** that together cover an agent's reach -
+**action** (grants + detectors + PDP), **data** (the query compiler + row
+entitlements + conformance proof + drift linter), and **information flow** (the
+IFC provenance veto) - plus confinement, audit, oversight, and assurance.
+Unifying all three behind one signed, fail-closed PDP is the design's edge.
 
 ---
 
@@ -126,12 +155,23 @@ validator: **no engineering, no rebuild of the engine.**
   per-table columns, required-date tables, row caps, permitted aggregations and
   operators) is declared in the policy. Add a table or column the desk needs, or
   remove one that is off-limits, by editing the allowlist; `aegis.policy_lint`
-  checks it is well-formed before signing.
+  checks it is well-formed, and `aegis.policy_schema_diff` checks it against the
+  **live schema** so a dropped column (silent lockout) or a new partitioned
+  table without a date bound (unbounded scan) is caught before signing.
+- **Row entitlements.** Per-principal row filters (which rows each principal may
+  see, by region, book, symbol, desk) are declared in the policy and injected
+  mandatorily into every compiled query. A `*` baseline plus table-specific
+  rules combine fail-safe (both apply), so forgetting one can only over-restrict,
+  never widen.
 - **Rules & threat packs.** Each pack (secrets, PII terms, destructive ops, prod
   markers, resource limits, MCP manifests, per-tool argument rules) is enabled
   and tuned in the policy - turn a pack on/off, add a sensitive term, a prod
   host/port pattern, a protected path. New deterministic rules ship as packs
   without touching the gate.
+- **Information-flow policy.** Which tools are privileged sinks (egress, write,
+  order, scoped query) and which columns/sources are untrusted (free-text fields,
+  external tool results) are declared so the IFC veto knows what untrusted
+  content must not drive.
 - **Tool surface & principals.** Which named tools an agent (or a specific
   principal) may use is a grant list, with RBAC scoping per principal; the
   free-form/break-glass surface is a separate, separately-signed policy.
@@ -139,14 +179,18 @@ validator: **no engineering, no rebuild of the engine.**
   block/escalation thresholds) and the kill action (signal / docker kill /
   kubectl delete / callback) are policy-configured.
 - **Confinement & deployment.** The hardening profile (read-only mounts, dropped
-  caps, egress allowlist, resource limits) is declarative and CI-checked against
-  your real manifest.
+  caps, egress allowlist, syscall filter, resource limits) is declarative and
+  CI-checked against your real manifest.
 
-**The change workflow:** author from the template, run the validator until clean,
-sign it (Ed25519), mount it read-only. Changing a rule = edit, re-validate,
-re-sign, reload the PDP - **no code change, fully audited.** A turnkey authoring
-kit (`policy.kdb.template.json` + `aegis.policy_lint` + a guide) lets the control
-function do all of this - and run the real-data re-soak - themselves.
+**The change workflow:** author from the template, run the validators until
+clean, sign it (Ed25519), mount it read-only. Every edit is checked by the
+**policy-change guard**: a change that only narrows the allow-set auto-applies;
+a change that **widens** it (grants any new capability) is refused until a human
+explicitly approves, and the exact new grant is named. Changing a rule = edit,
+re-validate, re-sign, reload the PDP - **no code change, fully audited.** A
+turnkey authoring kit (`policy.kdb.template.json` + the validators + a guide)
+lets the control function do all of this - and run the real-data re-soak -
+themselves.
 
 ---
 
@@ -159,22 +203,26 @@ function do all of this - and run the real-data re-soak - themselves.
    even allowed?).
 3. The **query compiler** validates every field against allowlists (table,
    per-table columns, operators, aggregations) and emits **bounded q** - a date
-   filter is required on partitioned tables, the result is capped, and the
-   compiled output is re-checked against a dangerous-construct backstop. Any
-   off-allowlist field → reject, fail-closed.
-4. **Detector packs** and the **egress proxy** apply as a veto on anything that
-   passes (secrets, classified-data egress, destructive ops, prod targets,
-   resource limits).
-5. The decision (`allow` / `block` / `require_approval`) is recorded to the
+   filter is required on partitioned tables, the result is capped, the
+   principal's **mandatory row-entitlement filter is ANDed in** (covering both
+   sides of any join/setop), and the compiled output is re-checked against a
+   dangerous-construct backstop. Any off-allowlist field → reject, fail-closed.
+4. The **information-flow veto** checks the action's provenance: if its arguments
+   were derived from **untrusted** content (a prior tool result, a file, a
+   free-text field) and the tool is a **privileged sink**, the action is blocked
+   before it runs - regardless of what the injected text said.
+5. **Detector packs** and the **egress proxy** apply as a further veto (secrets,
+   classified-data egress, destructive ops, prod targets, resource limits).
+6. The decision (`allow` / `block` / `require_approval`) is recorded to the
    **tamper-evident audit**, mirrored off-host.
-6. The **supervisor** observes the decision *sequence*; behavioural tripwires
+7. The **supervisor** observes the decision *sequence*; behavioural tripwires
    (repeated blocks, a critical rule firing, an unclassified action) trip a
    **circuit breaker** that quarantines the principal and fires a **kill
    switch**, writing an incident. The **LLM overseer** narrates that incident
    out-of-band (advisory; it never delays or alters a decision).
-7. Only an `allow` reaches the real kdb+ gateway - and even then, the agent runs
+8. Only an `allow` reaches the real kdb+ gateway - and even then, the agent runs
    inside **OS confinement** that physically prevents shell, file destruction,
-   and network egress.
+   network egress, and the dangerous syscalls.
 
 ---
 
@@ -182,13 +230,24 @@ function do all of this - and run the real-data re-soak - themselves.
 
 Aegis is validated by deterministic, runnable proofs - not assertions.
 
-- **Acceptance suite (CI-gated):** 27 core batteries (`python -m
+- **Acceptance suite (CI-gated):** 32 core batteries (`python -m
   aegis.run_all_checks`), run on Python 3.10-3.12, plus a wheel fresh-install
   smoke test, the deployment-hardening gate, and ruff - on every push.
 - **Formal:** the default-deny grant algebra is proved sound and monotonic by
-  exhaustion, and by **Z3/SMT over unbounded string domains** (24 theorems).
-- **OS confinement, on real Linux:** an adversarial test (7/7) and a Landlock
-  filesystem-confinement test (6/6) - kernel-enforced, fail-closed.
+  exhaustion, and by **Z3/SMT over unbounded string domains**. AWS's open-source
+  **Cedar Analysis CLI (CVC5)** independently corroborates the exported policy as
+  a second, external proof checker for the assurance story.
+- **q-semantics conformance, on real kdb+:** a battery compiles representative
+  and hostile requests with the real compiler and runs the emitted q against a
+  live kdb+ instance, asserting the safety bounds actually hold in q's runtime -
+  the materialisation cap holds, a reducing query is not corrupted by the cap,
+  the entitlement predicate is present and effective, hostile shapes are
+  rejected, and the database is byte-identical (read-only) afterwards.
+- **OS confinement, on real Linux:** an adversarial test (no host secrets,
+  empty network namespace, read-only system dirs, no-new-privs, read-only
+  policy) and a Landlock filesystem-confinement test, both fail-closed; the
+  **seccomp-bpf** syscall deny-list is verified at the kernel level (a blocked
+  syscall is killed with SIGSYS while benign syscalls run).
 - **Production-scale realism soak (the headline evidence).** A synthetic but
   realistic kdb+ estate - **4 FSP HDBs × 500M trade + 500M quote = ~4 billion
   rows**, partitioned, enumerated sym, 166 GB on disk:
@@ -199,9 +258,25 @@ Aegis is validated by deterministic, runnable proofs - not assertions.
   - **Ground-truth correctness:** answers checked against independently-computed
     q results - *served-and-correct*, not just "ran." Every miss was the *model*
     writing the wrong query, never the guardrail.
-  - **The process found and fixed two real defects in the primary control**
-    (a row cap that corrupted aggregations at scale; a follow-on materialization
-    regression) - exactly what scale + ground-truth checking exist to catch.
+  - **Row entitlements at scale:** an analyst entitled to AAPL/MSFT sees only
+    those rows - through joins, set-ops, and even when explicitly asking for
+    other symbols (0 rows). The mandatory filter cannot be removed or widened.
+  - **The process found and fixed real defects in the primary control** (a row
+    cap that corrupted aggregations at scale; a follow-on materialization
+    regression; an entitlement-combine widening path) - exactly what scale +
+    ground-truth checking exist to catch.
+- **Prompt-injection (information-flow control):**
+  - *On the estate:* a real indirect-injection corpus (poisoned file → egress,
+    poisoned free-text field → order, untrusted → privileged) gave **100%
+    injection block, 0 benign false positives** (the analyst query path is
+    trusted and non-sink, so legitimate work is untouched).
+  - *On the standard benchmark (AgentDojo, official, Opus):* with the full stack
+    on, the agent has real utility (utility is not tanked under attack) and
+    targeted-attack-success sits at or near zero, with IFC observably firing on
+    the canonical injections. The clean with-versus-without delta on the egress
+    suites (where IFC earns its keep) is **partially complete** - the baseline
+    run hit an API-credit stop mid-suite; this is documented and resumable, and
+    is corroboration of an already-proven deterministic property, not a blocker.
 
 ---
 
@@ -221,10 +296,18 @@ Aegis is validated by deterministic, runnable proofs - not assertions.
   largest part of that gap but does not close it. For adversarial multi-tenant,
   run the same policy with the agent inside a microVM (Firecracker/Kata) -
   documented, not yet deployed.
+- **The injection defense is structural, but its false-positive cost is
+  surface-specific.** On the kdb+ analyst surface the false-positive rate is zero
+  because the query columns are structured trusted data, so nothing legitimate is
+  tainted. On a broad tool surface (chat, email, document agents) where benign
+  actions routinely derive from untrusted content, the same provenance rule can
+  over-block and must be tuned per surface - the AgentDojo runs surface exactly
+  this nuance. IFC raises the bar deterministically; it is not free of tuning.
 - The reported numbers are on a **representative** corpus and a **synthetic**
-  (if realistic-scale) schema. They prove the design; they are **not** a
-  production number. The control function must re-soak on the **real desk corpus
-  and real data** before enforcing - the one gate only they can close.
+  (if realistic-scale) schema, plus a partial run of the AgentDojo standard
+  benchmark. They prove the design; they are **not** a production number. The
+  control function must re-soak on the **real desk corpus and real data** before
+  enforcing - the one gate only they can close.
 - The free-form (raw-q) surface still exists as **admin-only break-glass**,
   separately signed, never granted to an analyst; it rests on the denylist +
   confinement and is honestly weaker than the structured surface.
@@ -233,21 +316,43 @@ Aegis is validated by deterministic, runnable proofs - not assertions.
   *which result size* is returned, but it does not widen aggregations, so a sum
   over a very large integer column can overflow to a wrong number. This is a
   correctness property of q, not a safety bound; it is asserted and surfaced by
-  the q-semantics conformance battery (`aegis.q_conformance_test`, P7).
+  the q-semantics conformance battery (`aegis.q_conformance_test`, P7). The fix
+  is an estate-side schema choice (widen those columns to `long`).
 
 ---
 
-## 9. Status & what remains
+## 9. Where this sits versus the frontier
+
+A 2026 multi-source review (full report in
+`docs/Aegis-Frontier-Research-2026-06.md`) places Aegis as strongly **aligned**
+with the deterministic, out-of-band enforcement direction the field has
+converged on, and **ahead** in one place: no competitor was found compiling
+agent queries as a safety gate (the closest research uses an LLM to *rewrite*
+queries - the opposite trust model), and none at the q/kdb+ plane. The
+information-flow layer brings the prompt-injection defense level with the
+research frontier (Microsoft FIDES). The honest residual gaps are a microVM
+substrate for fully-untrusted third-party code (the deterministic syscall filter
+makes the current stack defensible for first-party agents) and completing the
+standard-benchmark delta. Two claims that the evidence does **not** support, and
+which Aegis therefore does not make, are flagged in that report.
+
+---
+
+## 10. Status & what remains
 
 **Engineering: complete and validated** on the structured kdb+ analyst surface
-- bounded-by-construction query plane, kernel confinement, two-tier oversight +
-kill switch, signed out-of-process PDP, tamper-evident WORM audit, installable
-package, CI-gated at 27/27.
+- bounded-by-construction query plane, mandatory row entitlements, deterministic
+prompt-injection defense, kernel confinement (namespaces + Landlock + seccomp),
+two-tier oversight + kill switch, signed out-of-process PDP with a
+policy-change guard, tamper-evident WORM audit, installable package, CI-gated at
+32/32.
 
 **Remaining - the human gates (not code):**
 1. Control-function **real-data re-soak** (the authoring kit makes this turnkey).
 2. A **design partner** running it in monitor mode on production traffic.
 3. A **third-party security audit** before a production estate depends on it.
+4. Completing the **AgentDojo official with-versus-without delta** on the egress
+   suites (resumable; corroboration, not a blocker).
 
 **Recommendation:** GO to enforce on the structured analyst surface, conditioned
 on confinement deployed (load-bearing), free-form kept off the analyst grant,
