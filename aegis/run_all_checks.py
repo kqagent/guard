@@ -53,6 +53,7 @@ OPTIONAL = [
     ("verify_kdb_bridge", "bridges this repo's tools/gate.js (needs Node)"),
     ("formal_smt", "Z3 proofs over unbounded domains (needs z3-solver)"),
     ("q_conformance_test", "compiler safety bounds proven on REAL kdb+ (needs a q binary)"),
+    ("cedar_analysis", "Cedar Analysis CLI corroboration of the grant-algebra proofs (needs Cedar/CVC5)"),
 ]
 
 
