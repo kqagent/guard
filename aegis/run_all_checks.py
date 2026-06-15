@@ -28,6 +28,7 @@ CORE = [
     ("egress_proxy_daemon_test", "egress forward-proxy daemon: forward/block/DLP/CONNECT tunnel"),
     ("signing_test", "Ed25519 policy signing; tamper/wrong-key/missing -> fail-closed"),
     ("confinement_test", "deployment hardening validator"),
+    ("seccomp_test", "seccomp-bpf syscall deny-list: well-formed BPF + real kernel SIGSYS kill"),
     ("audit_worm_test", "tamper-proof audit: mirror + anchor truncation detection"),
     ("monitor", "monitor mode + false-positive / recall metrics"),
     ("formal", "exhaustive proof: default-deny soundness + monotonic confinement"),

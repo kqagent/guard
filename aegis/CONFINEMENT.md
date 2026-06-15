@@ -66,16 +66,36 @@ by default):
 - **`confine_run.sh`** — rootless sandbox via user/mount/net/pid/uts/ipc
   namespaces + pivot_root minimal rootfs + rlimits + no-new-privs, with a
   **post-setup integrity self-check that refuses to run if system dirs aren't
-  truly read-only** (no false confidence). Proven: `confine_adversarial_test.sh`.
+  truly read-only** (no false confidence), and a **seccomp-bpf syscall
+  deny-list as the innermost layer** (see next). Proven:
+  `confine_adversarial_test.sh`.
+- **`seccomp_confine.py`** — a **seccomp-bpf syscall deny-list**, hand-assembled
+  in pure ctypes (no libseccomp). Namespaces + Landlock restrict what a process
+  can *name*; they do **not** reduce the *kernel attack surface* — every syscall
+  is still reachable. This filter blocks ~36 clearly-dangerous syscalls
+  (`ptrace`, `process_vm_*`, `mount`/`umount2`/`pivot_root`/`setns`/`unshare`
+  and friends, `init_module`/`finit_module`/`kexec_*`, `bpf`,
+  `perf_event_open`, `userfaultfd`, the kernel keyring, host-state changes,
+  fs-handle escape) — a legitimate analyst payload issues none of them. Action
+  is `KILL_PROCESS` (SIGSYS) by default; the installer **fails closed** if the
+  kernel refuses the filter. `confine_run.sh` runs it as the innermost wrapper
+  when a working python3 is present (transparent otherwise; `AEGIS_NO_SECCOMP=1`
+  disables). Proven: `aegis.seccomp_test` (well-formed BPF cross-platform; on
+  Linux a real `unshare` is SIGSYS-killed while benign syscalls run, and errno
+  mode returns EPERM). Honest: a deny-list is weaker than an allow-list (an
+  un-listed dangerous syscall slips through) — it raises the bar, it is not a
+  microVM.
 
-Honest scope (per Sandlock, arXiv:2605.26298): a namespace/Landlock sandbox is
-materially weaker than a microVM against a **kernel-level** attacker — kernel
-vulns, side channels, and deliberate global-resource exhaustion are out of
-scope. For hard multi-tenant adversarial isolation, run the same Aegis policy
-with the agent inside a **microVM (Firecracker / Kata Containers)** — see
-`deploy/MICROVM.md`. Landlock/namespaces are the right default for a
-single-tenant trusted-operator agent; the microVM is the upgrade when the
-workload is adversarial.
+Honest scope (per Sandlock, arXiv:2605.26298): a namespace/Landlock/seccomp
+sandbox is still materially weaker than a microVM against a **kernel-level**
+attacker — a kernel 0-day in an *allowed* syscall, side channels, and deliberate
+global-resource exhaustion are out of scope. seccomp shrinks the reachable
+syscall surface (the largest part of that gap) but does not close it. For hard
+multi-tenant adversarial isolation, run the same Aegis policy with the agent
+inside a **microVM (Firecracker / Kata Containers)** — see `deploy/MICROVM.md`.
+Namespaces + Landlock + seccomp are the right default for a single-tenant
+trusted-operator agent; the microVM is the upgrade when the workload is
+adversarial.
 
 ## Deploy artifacts (in `deploy/`)
 

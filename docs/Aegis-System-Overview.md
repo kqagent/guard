@@ -214,10 +214,13 @@ Aegis is validated by deterministic, runnable proofs - not assertions.
   is leaky; the kernel confinement is what actually contains a determined agent.
   Claims beyond "mediates and confines agent actions, fail-closed, fully
   audited" are overclaims.
-- A namespace/Landlock sandbox is **weaker than a microVM** against a
-  kernel-level attacker (out of scope: kernel vulns, side channels). For
-  adversarial multi-tenant, run the same policy with the agent inside a microVM
-  (Firecracker/Kata) - documented, not yet deployed.
+- A namespace/Landlock/seccomp sandbox is **weaker than a microVM** against a
+  kernel-level attacker (out of scope: a kernel 0-day in an allowed syscall,
+  side channels). The seccomp-bpf layer blocks the clearly-dangerous syscalls
+  (module load, ptrace, mount/namespace escape, kexec, bpf), which shrinks the
+  largest part of that gap but does not close it. For adversarial multi-tenant,
+  run the same policy with the agent inside a microVM (Firecracker/Kata) -
+  documented, not yet deployed.
 - The reported numbers are on a **representative** corpus and a **synthetic**
   (if realistic-scale) schema. They prove the design; they are **not** a
   production number. The control function must re-soak on the **real desk corpus

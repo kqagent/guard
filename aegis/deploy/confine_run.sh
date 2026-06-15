@@ -34,6 +34,11 @@ export _AEGIS_POLICY_DIR="$POLICY_DIR"
 
 if [ "${_AEGIS_CONFINED:-0}" != "1" ]; then
   export _AEGIS_CONFINED=1
+  # Locate the self-contained seccomp installer now (the original FS is still
+  # visible) and carry the path into the namespaced re-exec, so the innermost
+  # layer (a seccomp-bpf syscall deny-list) can be staged before pivot_root.
+  : "${AEGIS_SECCOMP_SRC:=$(cd "$(dirname "$0")" 2>/dev/null && pwd)/seccomp_confine.py}"
+  export AEGIS_SECCOMP_SRC
   exec unshare --user --map-root-user --mount --net --pid --uts --ipc --fork --kill-child \
     -- "$0" "$POLICY_DIR" -- "$@"
 fi
@@ -95,6 +100,11 @@ mkdir -p "$NEWROOT/dev"
 mount --rbind /dev "$NEWROOT/dev" 2>/dev/null || true
 
 mount -t tmpfs tmpfs "$NEWROOT/scratch"
+# Stage the seccomp installer into the new root (it is self-contained stdlib) so
+# it survives pivot_root and can run as the innermost wrapper below.
+if [ -f "${AEGIS_SECCOMP_SRC:-}" ]; then
+  cp "$AEGIS_SECCOMP_SRC" "$NEWROOT/scratch/.aegis_seccomp.py" 2>/dev/null || true
+fi
 mount --bind "$_AEGIS_POLICY_DIR" "$NEWROOT/policy" 2>/dev/null || true
 mount -o remount,ro,bind "$NEWROOT/policy" 2>/dev/null || true
 mount -t proc proc "$NEWROOT/proc" 2>/dev/null || true
@@ -125,4 +135,18 @@ ulimit -v 4000000 2>/dev/null || true   # RLIMIT_AS (KB) — runaway-memory guar
 
 export HOME=/scratch TMPDIR=/scratch PATH=/usr/bin:/bin AEGIS_CONFINEMENT="$STRATEGY"
 cd /scratch
+
+# INNERMOST LAYER: a seccomp-bpf syscall deny-list (kernel-attack-surface
+# reduction — namespaces+pivot_root restrict what can be NAMED but not which
+# syscalls can be issued). The installer fails closed itself: if the kernel
+# refuses the filter the payload does not run. Transparent when python3 + the
+# staged installer are present; AEGIS_NO_SECCOMP=1 disables it for debugging.
+if [ "${AEGIS_NO_SECCOMP:-0}" != "1" ] && [ -f /scratch/.aegis_seccomp.py ] \
+   && command -v python3 >/dev/null 2>&1 && python3 -c 'import sys' >/dev/null 2>&1; then
+  # python3 both present AND able to initialise in this rootfs (strategy A /
+  # native Linux). The installer fails closed if the kernel refuses the filter.
+  exec setpriv --no-new-privs -- python3 /scratch/.aegis_seccomp.py -- "$@"
+fi
+# No working python3 to install the filter (e.g. WSL2 rbind-mask fallback): the
+# namespace/Landlock/rlimit controls still hold; seccomp is the layer we skip.
 exec setpriv --no-new-privs -- "$@"
