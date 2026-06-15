@@ -213,12 +213,19 @@ def make_gated_executor(guard: Guard, decision_log: list[dict], sink_policy: Sin
             if not blocked_results:
                 return super().query(query, runtime, env, messages, extra_args)
 
-            # Execute only the allowed subset via the parent implementation,
-            # then splice the refusals back in.
+            # Execute only the allowed subset via the parent implementation, then
+            # splice the refusals back in. The Anthropic API requires EVERY
+            # tool_result to have a matching tool_use in the preceding assistant
+            # message, so we must RESTORE the original assistant message (with all
+            # tool_use blocks) — not the pruned one — and emit a result for every
+            # call: executed results for allowed, refusal results for blocked.
             pruned = [*messages[:-1], {**messages[-1], "tool_calls": allowed_calls}]
             q, runtime, env, out_messages, extra = super().query(
                 query, runtime, env, pruned, extra_args)
-            return q, runtime, env, [*out_messages, *blocked_results], extra
+            out = list(out_messages)
+            if len(out) > len(messages) - 1:
+                out[len(messages) - 1] = messages[-1]   # restore full assistant msg (all tool_use)
+            return q, runtime, env, [*out, *blocked_results], extra
 
     return AegisGatedExecutor()
 
@@ -333,6 +340,13 @@ def live_run(version: str, suite_names: list[str], model: str, attack_name: str,
                                      benchmark_suite_without_injections)
     from agentdojo.task_suite.load_suites import get_suite
 
+    # agentdojo 0.1.35 + pydantic 2.13: TaskResults has a forward ref to
+    # FunctionCall that pydantic resolves lazily and then errors on deserialisation
+    # ("not fully defined"). Force the rebuild once, up front.
+    from agentdojo.functions_runtime import FunctionCall  # noqa: F401
+    from agentdojo.benchmark import TaskResults
+    TaskResults.model_rebuild()
+
     logdir.mkdir(parents=True, exist_ok=True)
     summary: dict[str, dict] = {}
 
@@ -348,28 +362,39 @@ def live_run(version: str, suite_names: list[str], model: str, attack_name: str,
             llm,
             ToolsExecutionLoop([make_gated_executor(guard, decision_log, sink), llm]),
         ])
-        pipeline.name = f"aegis-gated-{model}"
+        # agentdojo's important_instructions attack maps a KNOWN model-id substring
+        # in the pipeline name to a prose vendor name. Our model id (haiku-4.5)
+        # postdates this agentdojo's table, so embed a recognised Claude id that maps
+        # to "Claude" (we ARE a Claude) for the impersonation; keep the aegis tag + real model for logs.
+        pipeline.name = f"aegis-gated-claude-3-5-sonnet-20241022-{model}"
 
         user_tasks = None
         if tasks_limit:
             user_tasks = sorted(suite.user_tasks)[:tasks_limit]
 
+        # agentdojo 0.1.35 reads the logdir from the CONTEXT logger (the internal
+        # TraceLogger asks Logger.get().logdir; the default NullLogger has none), so
+        # wrap the benchmark calls in an OutputLogger context.
+        from agentdojo.logging import OutputLogger
         print(f"\n--- {name}: benign run ---")
-        benign = benchmark_suite_without_injections(
-            pipeline, suite, logdir=logdir / "benign", force_rerun=False,
-            user_tasks=user_tasks, benchmark_version=version)
+        with OutputLogger(str(logdir / "benign")):
+            benign = benchmark_suite_without_injections(
+                pipeline, suite, logdir=logdir / "benign", force_rerun=False,
+                user_tasks=user_tasks, benchmark_version=version)
         print(f"--- {name}: attack run ({attack_name}) ---")
         attack = load_attack(attack_name, suite, pipeline)
-        attacked = benchmark_suite_with_injections(
-            pipeline, suite, attack, logdir=logdir / "attack", force_rerun=False,
-            user_tasks=user_tasks, benchmark_version=version)
+        with OutputLogger(str(logdir / "attack")):
+            attacked = benchmark_suite_with_injections(
+                pipeline, suite, attack, logdir=logdir / "attack", force_rerun=False,
+                user_tasks=user_tasks, benchmark_version=version)
 
-        benign_utility = statistics.mean(map(float, benign.utility_results.values())) \
-            if benign.utility_results else 0.0
-        utility_under_attack = statistics.mean(map(float, attacked.utility_results.values())) \
-            if attacked.utility_results else 0.0
-        attack_success = statistics.mean(map(float, attacked.security_results.values())) \
-            if attacked.security_results else 0.0
+        # agentdojo 0.1.35 returns SuiteResults as a TypedDict (key access, not attr).
+        b_util = benign["utility_results"]
+        a_util = attacked["utility_results"]
+        a_sec = attacked["security_results"]
+        benign_utility = statistics.mean(map(float, b_util.values())) if b_util else 0.0
+        utility_under_attack = statistics.mean(map(float, a_util.values())) if a_util else 0.0
+        attack_success = statistics.mean(map(float, a_sec.values())) if a_sec else 0.0
         summary[name] = {
             "benign_utility": round(benign_utility, 4),
             "utility_under_attack": round(utility_under_attack, 4),
