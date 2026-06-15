@@ -35,6 +35,12 @@ A top-level `entitlements` block (merged into the compiler config by `from_polic
 - **Mandatory + ANDed.** It is appended to the `where` clause regardless of request
   content, so it ANDs with the agent's own predicates. If the agent also asks for a
   non-entitled symbol, the result is the **intersection** (empty), not a widening.
+- **Fail-safe combine.** A `*` baseline and a table-specific rule for the same
+  principal are **both** applied (ANDed), never replace-one-with-the-other — so a
+  global fence (e.g. region) is never silently dropped for a table that also has a
+  column-specific rule. Forgetting can only over-restrict, never widen.
+- **`meta` honours default-deny.** `op:'meta'` returns no rows but is still gated, so
+  an un-entitled principal cannot enumerate a table's schema.
 - **Principal from the PDP.** `compile(request, principal=…)` takes the principal as
   an argument from the authenticated action — **never from the request body** (a
   `principal` key in the request is ignored).
@@ -44,12 +50,17 @@ A top-level `entitlements` block (merged into the compiler config by `from_polic
 
 ## Proven (unit + real 4B estate)
 
-`aegis/query_compiler_entitlements_test.py` (in `run_all_checks`, 28/28) — 14 cases:
+`aegis/query_compiler_entitlements_test.py` (in `run_all_checks`, 30/30) — 18 cases:
 mandatory-AND, can't-escape intersection, joins+setops both-sided, default-deny reject,
-wrong-table reject, `*` wildcard, hostile value/column reject, open-mode no-op,
-request-body principal ignored, plus the span cap.
+wrong-table reject, `*` wildcard, **fail-safe combine** (`*` baseline AND a
+table-specific rule both apply — neither silently drops the other), **`meta` gated
+under default-deny**, hostile value/column reject, open-mode no-op, request-body
+principal ignored, plus the span cap. The compiled q is additionally proven against
+**real kdb+** by `aegis/q_conformance_test.py` (P3: entitlement predicate present and
+effective; a contradictory agent filter intersects to empty).
 
-On the real 500M-row HDB (`analyst-equities` entitled to AAPL/MSFT):
+On the real estate (500M-row partition shown; the properties were re-confirmed at the
+full 4B scale) with `analyst-equities` entitled to AAPL/MSFT:
 - distinct symbols the analyst can see: **`AAPL`MSFT only**.
 - explicit request for GOOG/NVDA: **0 rows** (intersection with the entitlement).
 - entitled `count`: 392,793 vs 10,000,000 full partition (filter applies at scale).
