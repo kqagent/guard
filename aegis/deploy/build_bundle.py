@@ -44,7 +44,27 @@ def main() -> int:
                     help="private key file (PEM for ed25519, hex secret for hmac) to reuse")
     ap.add_argument("--algo", default=None,
                     help="ed25519 (default when cryptography is present) or hmac-sha256")
+    ap.add_argument("--against", type=Path, default=None,
+                    help="previously-signed policy.json to gate this build against: a WIDENING "
+                         "of the allow-set is refused unless --approve-widening (monotonic confinement)")
+    ap.add_argument("--approve-widening", action="store_true",
+                    help="explicitly approve a policy update that widens the allow-set")
     args = ap.parse_args()
+
+    # monotonic-confinement gate: an unreviewed WIDENING of the allow-set must not
+    # ship. Compare the new policy against the previously-signed one.
+    if args.against is not None:
+        from aegis.monotonic_confinement import classify_policy_change
+        old_p = json.loads(args.against.read_text(encoding="utf-8"))
+        new_p = json.loads(args.policy.read_text(encoding="utf-8"))
+        res = classify_policy_change(old_p, new_p)
+        if res["verdict"] in ("widening", "fail_closed") and not args.approve_widening:
+            print(f"REFUSED — policy update is a {res['verdict']}; newly-allowed: "
+                  f"{res.get('newly_allowed') or res.get('reason')}. "
+                  "Re-run with --approve-widening after control-function review.")
+            return 1
+        print(f"  monotonic-confinement: {res['verdict']}"
+              + (" (approved)" if res["verdict"] == "widening" else ""))
 
     algo = args.algo or ("ed25519" if signing.have_ed25519() else "hmac-sha256")
     out = args.outdir

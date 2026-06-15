@@ -32,6 +32,7 @@ CORE = [
     ("audit_worm_test", "tamper-proof audit: mirror + anchor truncation detection"),
     ("monitor", "monitor mode + false-positive / recall metrics"),
     ("formal", "exhaustive proof: default-deny soundness + monotonic confinement"),
+    ("monotonic_confinement_test", "policy-update guard: narrowing auto / widening needs approval"),
     ("agentdojo_eval", "AgentDojo-aligned tool-call defense (model-independent)"),
     ("compliance", "regulatory crosswalk self-verified against runnable evidence"),
     ("mcp_test", "per-MCP-server manifests (AgentBound-style zero-privilege)"),
