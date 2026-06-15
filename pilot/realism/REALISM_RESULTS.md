@@ -17,11 +17,39 @@ shared box.
 
 ## R5 — performance (the resource controls are real at this scale)
 
-- A bounded compiled aggregate over one 500M-row table partition returns the
-  **correct** answer (count = 10,000,000) in ~0.0 s.
-- The unbounded `select from trade` is **blocked at the gate**
-  (`RES-UNBOUNDED-SCAN`) — it never reaches the 500M HDB. At this scale that scan
-  would genuinely degrade the box, so the control is real, not theatre.
+*Measured on the real fsp1 HDB (10M rows/partition, 500M rows/table) after the
+shape-aware cap fix (`968d2c1`). The earlier draft of this section was measured
+against the pre-fix uniform `N sublist` cap; the numbers below replace it.*
+
+The cap bounds two distinct things, and the doc states the actual resource
+property **per query shape** (not just "bounded"):
+
+| query shape | compiled cap | result to agent (IPC) | hdb materialisation (`\ts` space) |
+|---|---|---|---|
+| **raw row-listing**, 1 partition | `i<max_rows` + `N sublist` | **1,000,000 rows / 12 MB** | 151 MB |
+| **raw row-listing**, full 500M range | `i<max_rows` + `N sublist` | **1,000,000 rows / 12 MB** | **1.9 GB** |
+| same, **UNCAPPED** (what the cap prevents) | — | 500,000,000 rows / **5.8 GB** | **8.7 GB** |
+| **reducing** (aggs/by/distinct), 1 partition | `N sublist` only (no `i<N`) | tiny (1 row / ~0 MB) | reads its partition by necessity; correct |
+
+Reading of the property:
+- **Result bound (what crosses to the agent): `N sublist` guarantees ≤ max_rows
+  rows globally, independent of match size** — a 1-partition and a full-500M-range
+  raw select both return exactly 1,000,000 rows / 12 MB. (`i<N` alone is *per
+  partition* and would let a 50-partition range return 50M rows — the outer
+  `sublist` is what makes the global bound hold; verified.)
+- **Materialisation bound (work on the hdb): the inner `i<max_rows` caps each
+  partition's read**, so the full-range raw select materialises **1.9 GB vs 8.7 GB
+  uncapped** (4.6×). Without `i<N`, one date partition (10M rows at this scale) is
+  fully materialised per query — a DoS vector a result-only cap does not stop.
+- **Reducing queries take no `i<N`** (it would corrupt the aggregate — Finding 1);
+  they read their input bounded to the date partition and return a tiny result
+  capped by `N sublist`.
+- The unbounded `select from trade` (no date) is **blocked at the gate**
+  (`RES-UNBOUNDED-SCAN`) — it never reaches the HDB at all.
+
+Correctness is **unchanged** by the shape-aware fix (re-scored on `968d2c1`:
+Opus 20/22, Haiku 15/18, Sonnet 12/21 — identical): raw selects return the same
+first-N rows, aggregates are untouched.
 
 ## Finding 1 (FIXED) — scan cap corrupted aggregations
 
