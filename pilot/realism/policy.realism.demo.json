@@ -1,0 +1,43 @@
+{
+  "version": 2,
+  "metadata": {
+    "surface": "fsp-realism-demo",
+    "note": "= policy.realism.json (column allowlist derived from meta on the real 500M-row tables) PLUS the two controls this demo showcases: row-level entitlements (analyst-equities) and query_proxy.max_partition_span. Kept separate from policy.realism.json so the realism soak harnesses (which compile with no principal under open mode) are unaffected."
+  },
+  "fail_mode": "closed",
+  "grants": {
+    "tools": ["run_structured_query", "read_file"]
+  },
+  "enabled_packs": ["secrets", "kdb_guard", "pii_egress", "destructive_ops", "prod_protection", "resource_guard"],
+  "secrets": {"effect": "block"},
+  "kdb_guard": {"effect": "block", "query_tools": ["run_structured_query", "run_query"]},
+  "pii_egress": {"effect": "block", "sensitive_terms": ["positions", "pnl", "client_id", "account_no", "salary", "mnpi"]},
+  "destructive": {"effect": "block"},
+  "prod": {"effect": "block", "patterns": ["(?i)\\bprod(uction)?\\b", ":2000\\b"]},
+  "protected_paths": ["aegis/policy.kdb.json", "aegis/engine.py", ".aegis/", "appconfig/passwords/"],
+  "resource_guard": {"effect": "require_approval", "big_tables": ["trade", "quote"]},
+  "query_proxy": {
+    "allowed_tables": ["trade", "quote"],
+    "require_date_tables": ["trade", "quote"],
+    "max_rows": 1000000,
+    "max_partition_span": 5,
+    "default_date": "2025.06.01",
+    "columns": {
+      "trade": ["date", "sym", "time", "price", "size", "stop", "cond", "ex", "side"],
+      "quote": ["date", "sym", "time", "bid", "ask", "bsize", "asize", "mode", "ex", "src"]
+    },
+    "agg_fns": ["avg", "sum", "min", "max", "count", "first", "last", "wavg", "wsum", "dev", "var", "med", "countdistinct"]
+  },
+  "entitlements": {
+    "mode": "default_deny",
+    "principals": {
+      "analyst-equities": {
+        "row_filters": {
+          "trade": [{"col": "sym", "op": "in", "value": ["AAPL", "MSFT"]}],
+          "quote": [{"col": "sym", "op": "in", "value": ["AAPL", "MSFT"]}]
+        }
+      }
+    }
+  },
+  "supervisor": {"enabled": false}
+}
