@@ -13,6 +13,8 @@ under the hood:
   * the IFC section uses aegis.ifc directly.
 
 Run:  .venv/bin/python pilot/realism/demo_should_shouldnt.py
+      .venv/bin/python pilot/realism/demo_should_shouldnt.py --pause   # stop after each
+                                                                       # test (press Enter)
 Writes pilot/realism/DEMO_should_shouldnt.md and prints the same transcript.
 """
 from __future__ import annotations
@@ -39,11 +41,23 @@ PRINCIPAL = "analyst-equities"
 ENT_PRED = "sym in `AAPL`MSFT"          # this principal's mandatory row filter
 
 _buf: list[str] = []
+PAUSE = "--pause" in sys.argv      # stop after each test; press Enter for the next
 
 
 def emit(line: str = "") -> None:
     _buf.append(line)
     print(line)
+
+
+def pause() -> None:
+    """In --pause mode, wait for Enter between tests (interactive demo). The prompt
+    is printed to the terminal only — never written into the saved transcript."""
+    if not PAUSE or not sys.stdin.isatty():
+        return
+    try:
+        input("    ⏎  press Enter for the next test … ")
+    except (EOFError, KeyboardInterrupt):
+        raise SystemExit(0)
 
 
 def rule() -> None:
@@ -194,6 +208,7 @@ def section1(qc: QueryCompiler, port: int) -> dict:
         emit("```")
         emit(f"=> {'PASS' if ok else 'FAIL'}\n")
         passed += int(ok)
+        pause()
 
     return {"total": len(cases), "passed": passed}
 
@@ -248,6 +263,7 @@ def section2(qc: QueryCompiler) -> dict:
         emit("```")
         emit(f"=> {'BLOCKED (never reached kdb+)' if ok else 'LEAKED'}\n")
         blocked += int(ok)
+        pause()
 
     return {"total": len(cases), "blocked": blocked}
 
@@ -279,6 +295,7 @@ def section3(qc: QueryCompiler, port: int) -> dict:
     emit("```")
     ok = rows == 0
     emit(f"=> {'PASS — entitlement held: 0 rows, cannot be widened' if ok else 'FAIL'}\n")
+    pause()
     return {"rows": rows, "passed": ok}
 
 
@@ -327,6 +344,7 @@ def section4() -> dict:
         emit("```")
         emit(f"=> {'PASS' if ok else 'FAIL'}\n")
         passed += int(ok)
+        pause()
     return {"total": len(cases), "passed": passed}
 
 
@@ -348,6 +366,7 @@ def main() -> int:
     emit("entitled* q (should work), or *refuse* (should not)?\n")
 
     qc = QueryCompiler.from_policy(POLICY)
+    pause()
     proc = start_hdb(HDB, PORT)
     try:
         for _ in range(60):
