@@ -33,8 +33,8 @@ def styles():
     s.add(ParagraphStyle("Body", parent=s["Normal"], fontSize=9, leading=12, textColor=INK, spaceAfter=3))
     s.add(ParagraphStyle("Bull", parent=s["Normal"], fontSize=8.6, leading=11, textColor=INK))
     s.add(ParagraphStyle("Ask", parent=s["Normal"], fontSize=9, leading=11.5, textColor=INK, spaceBefore=3))
-    s.add(ParagraphStyle("Qcode", parent=s["Normal"], fontName="Courier", fontSize=7.6, leading=9.6,
-                         textColor=colors.HexColor("#0b3a5e"), backColor=CODEBG, borderPadding=3, spaceAfter=2))
+    s.add(ParagraphStyle("Qcode", parent=s["Normal"], fontName="Courier", fontSize=7.6, leading=10.5,
+                         textColor=colors.HexColor("#0b3a5e"), spaceBefore=0, spaceAfter=0))
     s.add(ParagraphStyle("Cell", parent=s["Normal"], fontSize=8.2, leading=10, textColor=INK))
     s.add(ParagraphStyle("CellH", parent=s["Normal"], fontSize=8.2, leading=10, textColor=colors.white, fontName="Helvetica-Bold"))
     s.add(ParagraphStyle("Foot", parent=s["Normal"], fontSize=7.6, leading=10, textColor=MUTED, spaceBefore=4))
@@ -51,7 +51,18 @@ def main() -> int:
         return Paragraph(t, s[sty])
 
     def code(t):
-        return Paragraph(t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"), s["Qcode"])
+        # render in a single-cell table so the background box reserves its own
+        # height (a Paragraph backColor+borderPadding overlaps neighbours) and
+        # long q lines WRAP inside the cell instead of overflowing.
+        para = Paragraph(t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br/>"),
+                         s["Qcode"])
+        ct = Table([[para]], colWidths=[180 * mm])
+        ct.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), CODEBG),
+            ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#c9d6e3")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+            ("TOPPADDING", (0, 0), (-1, -1), 3.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5)]))
+        return ct
 
     def tbl(rows, widths, header_colors=None):
         body = [[Paragraph(c, s["CellH"] if r == 0 else s["Cell"]) for c in row] for r, row in enumerate(rows)]
@@ -83,7 +94,7 @@ def main() -> int:
          "select vwap:size wavg price by sym from trade where date=2025.06.02, region in `EMEA"),
     ]
     for ask, q in asks:
-        st += [P("<b>" + ask + "</b>", "Ask"), code(q)]
+        st += [P("<b>" + ask + "</b>", "Ask"), code(q), Spacer(1, 1.5 * mm)]
     st += [P("<b>What to notice in every one</b> (the safety, baked in automatically):", "Body"),
            ListFlowable([ListItem(Paragraph(x, s["Bull"]), leftIndent=8) for x in [
                "A <b>date filter is always present</b> - no accidental full-history scan.",
@@ -110,6 +121,7 @@ def main() -> int:
     st += [P("C &nbsp; The row entitlement cannot be widened", "H"),
            P("An EMEA-entitled analyst explicitly asks for AMER rows. It does not error - it compiles to:"),
            code("select sym, region from trade where date=2025.06.02, region in `AMER, region in `EMEA, i<1000000"),
+           Spacer(1, 1.5 * mm),
            P("Both filters are present, so the query is self-contradictory and <b>returns nothing</b>. The "
              "analyst cannot widen their access, even by asking directly.")]
 
