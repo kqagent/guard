@@ -41,7 +41,7 @@ WHAT THE GATE ADDED UNDER THE HOOD:
                          ^ bounds rows read off disk per partition (RAW listings only — never added to aggregations, where it would corrupt the result)
     - result cap         1000000 sublist
                          ^ bounds the rows returned to the agent (applied to the final result)
-LIVE ON REAL DATA:      186,827 rows in 284 ms
+LIVE ON REAL DATA:      186,827 rows in 260 ms
 PROOF (entitlement):    distinct sym in result = `s#,`AAPL  (subset of entitled {AAPL,MSFT})
 NOTE (under the hood):  a RAW listing is a bounded SAMPLE — the `i<1000000` cap takes the
                         first 1M rows by storage order. This partition is sym-sorted, so
@@ -84,7 +84,7 @@ WHAT THE GATE ADDED UNDER THE HOOD:
                          ^ bounds rows read off disk per partition (RAW listings only — never added to aggregations, where it would corrupt the result)
     - result cap         10 sublist
                          ^ bounds the rows returned to the agent (applied to the final result)
-LIVE ON REAL DATA:      10 rows in 20 ms
+LIVE ON REAL DATA:      10 rows in 18 ms
 PROOF (cap honoured):   returned exactly 10 rows (limit=10); syms = `s#,`AAPL ⊆ entitled
 ```
 => PASS
@@ -102,7 +102,7 @@ WHAT THE GATE ADDED UNDER THE HOOD:
                          ^ the MANDATORY row filter for 'analyst-equities', injected by the gate from the policy — the agent cannot set, remove, or widen it
     - result cap         1000000 sublist
                          ^ bounds the rows returned to the agent (applied to the final result)
-LIVE ON REAL DATA:      2 rows in 5 ms
+LIVE ON REAL DATA:      2 rows in 4 ms
 PROOF (correctness):    result == an INDEPENDENT uncapped reference query?  True
                         reference: select vwap:size wavg price by sym from trade where date=2025.06.01, sym in `AAPL`MSFT
 ```
@@ -123,7 +123,7 @@ WHAT THE GATE ADDED UNDER THE HOOD:
                          ^ bounds rows read off disk per partition (RAW listings only — never added to aggregations, where it would corrupt the result)
     - result cap         1000000 sublist
                          ^ bounds the rows returned to the agent (applied to the final result)
-LIVE ON REAL DATA:      196,640 rows in 44139 ms
+LIVE ON REAL DATA:      196,640 rows in 44190 ms
 PROOF (entitlement):    joined result syms = `s#,`AAPL  (BOTH sides filtered to the entitled set)
 NOTE (under the hood):  the aj over ~187K x ~187K rows is genuinely heavy — the elapsed
                         time above is the real cost on this data, shown honestly.
@@ -230,7 +230,7 @@ WHAT THE GATE EMITTED   (note the TWO ANDed sym filters):
                           ^ `sym in `GOOG`NVDA`  = the agent's own filter (what it asked for)
                           ^ `sym in `AAPL`MSFT`  = the MANDATORY entitlement, ANDed in by the gate
                           their intersection is empty -> no row can satisfy both
-LIVE ON REAL DATA:      0 rows in 10 ms
+LIVE ON REAL DATA:      0 rows in 11 ms
 CONTROL:                are AAPL/GOOG/NVDA actually present in the data? = 111b
                         ^ GOOG and NVDA DO exist — the 0 rows is the entitlement, not a typo
 ```
