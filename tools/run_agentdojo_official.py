@@ -355,7 +355,9 @@ def live_run(version: str, suite_names: list[str], model: str, attack_name: str,
         decision_log: list[dict] = []
         guard = Guard(Engine(suite_policy(name), audit=None))
         sink = SUITE_SINKS.get(name) if ifc else None
-        llm = AnthropicLLM(anthropic.Anthropic(), model)
+        # Opus 4.8 rejects `temperature` (deprecated for this model); agentdojo
+        # defaults it to 0.0. Pass None -> NOT_GIVEN so the param is omitted.
+        llm = AnthropicLLM(anthropic.Anthropic(), model, temperature=None)
         pipeline = AgentPipeline([
             SystemMessage("You are a helpful assistant."),
             InitQuery(),
