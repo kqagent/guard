@@ -1,0 +1,303 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aegis — live guardrail on the real kdb+ estate</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:ital,wght@0,300;0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+/* Data Intellect house style: white ground, near-black text, amber (#ffc72c)
+   accent, Farset display face + Roboto Condensed body — pulled from the public
+   dataintellect.com theme. If the brand assets move, this degrades gracefully
+   to Roboto Condensed / the amber palette (placeholder-safe). */
+@font-face{font-family:Farset_B;src:url(https://dataintellect.com/wp-content/themes/mammoth-tailwind2/fonts/farset_feirste/Farset_B.woff2) format("woff2"),url(https://dataintellect.com/wp-content/themes/mammoth-tailwind2/fonts/farset_feirste/Farset_B.woff) format("woff");font-weight:400;font-display:swap}
+:root{--bg:#ffffff;--panel:#ffffff;--panel2:#f7f7f5;--line:#e5e7eb;--txt:#111111;--mut:#6b7280;--grn:#1a7f37;--red:#c0392b;--amb:#9a6b00;--blu:#2563eb;--accent:#ffc72c;--accent-soft:#fff7e0;
+--head:Farset_B,'Roboto Condensed',sans-serif;--body:'Roboto Condensed',system-ui,-apple-system,Segoe UI,sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.55 var(--body)}
+.wrap{max-width:1080px;margin:0 auto;padding:0 20px 110px}
+.di-bar{display:flex;align-items:center;gap:14px;border-bottom:3px solid var(--accent);padding:16px 0 12px;margin-bottom:22px;position:sticky;top:0;background:#fff;z-index:5}
+.di-bar img{height:30px;display:block}
+.di-bar .pname{font-family:var(--head);font-size:20px;font-weight:400;letter-spacing:.02em;color:#000;padding-left:14px;border-left:1px solid var(--line)}
+.di-bar .pname b{color:var(--accent);-webkit-text-stroke:.3px #caa000}
+h1{font-family:var(--head);font-size:25px;font-weight:400;margin:0 0 4px;letter-spacing:.01em}.spark{color:#000;border-bottom:3px solid var(--accent)}
+.sub{color:var(--mut);margin:0 0 16px}
+.live{display:inline-block;background:var(--accent-soft);color:#8a5a00;border:1px solid var(--accent);border-radius:4px;padding:3px 10px;font-size:12px;font-weight:700;margin-bottom:14px;text-transform:uppercase;letter-spacing:.04em}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:14px 0;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.step{color:#000;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin:0 0 4px}
+.step .n{display:inline-block;background:var(--accent);color:#000;border-radius:4px;width:22px;height:22px;line-height:22px;text-align:center;margin-right:8px;font-family:var(--head)}
+.desc{color:var(--mut);font-size:13px;margin:0 0 10px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 6px}
+.chip{background:#fff;border:1px solid var(--line);color:var(--txt);border-radius:4px;padding:6px 12px;font-size:13px;cursor:pointer;font-family:var(--body)}
+.chip:hover{border-color:var(--accent);background:var(--accent-soft)}
+.muted{color:var(--mut);font-size:13px}
+code{background:var(--panel2);border:1px solid var(--line);border-radius:3px;padding:1px 5px;font:12.5px ui-monospace,Menlo,Consolas,monospace}
+pre{white-space:pre-wrap;margin:6px 0 0;font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;color:#1a1a1a;background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:4px;padding:9px 11px}
+.lbl{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-top:10px;font-weight:700}
+.flow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0 2px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}
+.flow span{background:var(--panel2);border:1px solid var(--line);border-radius:3px;padding:2px 8px}
+.flow b{color:#000}
+.tx{font-size:12.5px;color:#333;margin:3px 0 0 12px}
+.tx b{color:var(--amb)}
+.verdict{font-weight:700;font-size:15px;padding:9px 13px;border-radius:4px;margin:10px 0}
+.ok{background:#e7f6ec;border:1px solid var(--grn);color:#13632b}
+.no{background:#fdecea;border:1px solid var(--red);color:#962419}
+.layer{display:inline-block;font-family:var(--head);font-size:11px;padding:2px 8px;border-radius:4px;margin-left:6px;border:1px solid}
+.layer.LIFTER{background:#eef4ff;border-color:var(--blu);color:#1746a2}
+.layer.COMPILER{background:#fff1e0;border-color:var(--amb);color:#7a4d00}
+.spin{display:none;color:var(--mut)}
+table.aud{width:100%;border-collapse:collapse;margin-top:6px;font:11.5px ui-monospace,Menlo,Consolas,monospace}
+table.aud th,table.aud td{border:1px solid var(--line);padding:4px 7px;text-align:left}
+table.aud th{background:var(--panel2);text-transform:uppercase;letter-spacing:.03em;font-size:10.5px;color:var(--mut)}
+.kv{font-size:13px;margin:2px 0}.kv b{color:#000}
+</style></head><body><div class="wrap">
+
+<div class="di-bar">
+  <img src="https://dataintellect.com/wp-content/themes/mammoth-tailwind2/images/di_logo_black.svg" alt="Data Intellect">
+  <span class="pname"><b>Aegis</b> guardrail</span>
+</div>
+
+<h1>Aegis, <span class="spark">live guardrail on the real kdb+ estate</span></h1>
+<div class="live">Real execution — nothing on this page is pre-recorded</div>
+<p class="sub">An LLM agent never sends q code to the database. It sends a request (structured) or a hand-written query (free-form);
+the gate validates every field against the policy allowlist, injects the mandatory bounds and this analyst's row entitlement,
+and emits the <i>only</i> q that runs — or refuses, fail-closed. Both routes pass through one chokepoint
+(<code>aegis.query_gate.QueryGate</code>) against a real ~500M-row HDB at <code>~/aegis-hdb/fsp1</code>.
+Principal: <code>analyst-equities</code>, entitled to <code>sym in AAPL,MSFT</code>.
+Each panel shows the same four things: <b>request → Aegis decision → the exact q (or rejection) → real result from the live HDB</b>.</p>
+
+<!-- 1 -->
+<div class="card">
+  <div class="step"><span class="n">1</span>Structured query — compiled, bounded, executed live</div>
+  <div class="desc">The compiler emits date-first, capped, entitlement-filtered q from a structured request. No q code from the agent.</div>
+  <div class="chips">
+    <span class="chip sw" data-c="filter">Filtered select</span>
+    <span class="chip sw" data-c="agg">Aggregation by sym</span>
+    <span class="chip sw" data-c="topn">Top 10 by price</span>
+    <span class="chip sw" data-c="vwap">VWAP by sym</span>
+    <span class="chip sw" data-c="asof">As-of join (heavy, honest)</span>
+  </div>
+  <span class="spin" id="sw_spin">compiling and executing on the live HDB …</span>
+  <div id="sw_out"></div>
+</div>
+
+<!-- 2 -->
+<div class="card">
+  <div class="step"><span class="n">2</span>Row-level entitlements — cannot be widened</div>
+  <div class="desc"><code>analyst-equities</code> explicitly asks for GOOG and NVDA (which exist). The compiled q carries
+    BOTH the agent's filter and the mandatory entitlement; their intersection is empty → 0 rows, proven on real data.</div>
+  <div class="chips"><span class="chip" id="ent_btn">Ask for GOOG &amp; NVDA, run it live</span></div>
+  <span class="spin" id="ent_spin">executing on the live HDB …</span>
+  <div id="ent_out"></div>
+</div>
+
+<!-- 3 -->
+<div class="card">
+  <div class="step"><span class="n">3</span>Free-form q — lifted &amp; recompiled (allowlist-on-parse)</div>
+  <div class="desc">A hand-written query is parsed, lifted to a structured request, and RECOMPILED through the same compiler.
+    The raw q is never executed. Below: liftable queries (incl. a date-second query normalised to date-first), then
+    dangerous / off-allowlist queries rejected — each naming WHICH layer caught it.</div>
+  <div class="muted" style="margin:4px 0 2px;font-weight:700">Lifted &amp; recompiled (runs):</div>
+  <div class="chips">
+    <span class="chip fo" data-c="plain">Hand-written select</span>
+    <span class="chip fo" data-c="normalise">Date written second → normalised</span>
+    <span class="chip fo" data-c="agg">Hand-written aggregation</span>
+  </div>
+  <span class="spin" id="fo_spin">lifting, recompiling, executing …</span>
+  <div id="fo_out"></div>
+  <div class="muted" style="margin:12px 0 2px;font-weight:700">Rejected (raw q never runs) — which layer?</div>
+  <div class="chips">
+    <span class="chip fb" data-c="system">system "id"</span>
+    <span class="chip fb" data-c="value">value "…"</span>
+    <span class="chip fb" data-c="delete">delete</span>
+    <span class="chip fb" data-c="update">update</span>
+    <span class="chip fb" data-c="twostmt">two statements</span>
+    <span class="chip fb" data-c="subquery">subquery</span>
+    <span class="chip fb" data-c="dotz">.z.P</span>
+    <span class="chip fb" data-c="hopen">hopen</span>
+    <span class="chip fb" data-c="badcol">bad column</span>
+    <span class="chip fb" data-c="badtable">bad table</span>
+    <span class="chip fb" data-c="nodate">missing date</span>
+  </div>
+  <div id="fb_out"></div>
+</div>
+
+<!-- 4 -->
+<div class="card">
+  <div class="step"><span class="n">4</span>Safety &amp; resource — dangerous ops inexpressible, scans bounded</div>
+  <div class="desc">Mutations have no verb in the grammar and are rejected by the lifter — inexpressible, not merely denied.
+    A would-be unbounded scan is bounded by the materialisation cap, so it cannot OOM the box.</div>
+  <div class="chips">
+    <span class="chip si" data-c="delete">Try: delete from trade</span>
+    <span class="chip si" data-c="update">Try: update price:0</span>
+    <span class="chip" id="cap_btn">Unbounded scan, bounded by the cap (live)</span>
+  </div>
+  <span class="spin" id="si_spin">checking …</span>
+  <div id="si_out"></div>
+  <div id="cap_out"></div>
+  <div class="muted" style="margin:12px 0 2px;font-weight:700">The structured route also refuses unsafe input (never reaches kdb+):</div>
+  <div class="chips">
+    <span class="chip sr" data-c="injval">Injection in a value</span>
+    <span class="chip sr" data-c="injcol">Injection in a column</span>
+    <span class="chip sr" data-c="span">Over the span cap</span>
+    <span class="chip sr" data-c="meta">meta, un-entitled principal</span>
+  </div>
+  <div id="sr_out"></div>
+</div>
+
+<!-- 5 -->
+<div class="card">
+  <div class="step"><span class="n">5</span>Injection defence (IFC) — deterministic, content-independent</div>
+  <div class="desc">A privileged sink (<code>submit_order</code>) is vetoed when its arguments derive from untrusted content
+    (a poisoned tool result), regardless of wording. Labels JOIN; untrusted wins. The same action from trusted input is allowed.</div>
+  <div class="chips">
+    <span class="chip ic" data-c="trusted">Trusted instruction</span>
+    <span class="chip ic" data-c="untrusted">Poisoned tool result</span>
+    <span class="chip ic" data-c="mixed">Trusted + untrusted mixed</span>
+  </div>
+  <div id="ic_out"></div>
+</div>
+
+<!-- 6 -->
+<div class="card">
+  <div class="step"><span class="n">6</span>The record — signed policy &amp; WORM audit, one line per decision</div>
+  <div class="desc">The policy is signed; if a byte changes, verification fails and the gate fails closed. Every decision you trigger
+    above appends one hash-chained, WORM audit line. The gate runs out-of-process behind OS confinement.</div>
+  <div class="chips"><span class="chip" id="rec_btn">Show signed policy + live audit chain</span></div>
+  <span class="spin" id="rec_spin">reading the record …</span>
+  <div id="rec_out"></div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+function esc(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+async function post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});return r.json();}
+const flow=(...steps)=>'<div class="flow">'+steps.map((s,i)=>(i?'→ ':'')+'<span>'+s+'</span>').join(' ')+'</div>';
+function txblock(d){let h='';if(d.transforms&&d.transforms.length){h+='<div class="lbl">what the gate added under the hood</div>';
+  d.transforms.forEach(t=>h+='<div class="tx"><b>'+esc(t[0])+'</b> &nbsp;<code>'+esc(t[1])+'</code><br><span class="muted">'+esc(t[2])+'</span></div>');}return h;}
+
+// 1 — structured
+document.querySelectorAll('.sw').forEach(c=>c.onclick=async()=>{
+  $('sw_spin').style.display='inline'; $('sw_out').innerHTML='';
+  const d=await post('/api/structured',{case:c.dataset.c}); $('sw_spin').style.display='none';
+  if(d.error){$('sw_out').innerHTML='<div class="verdict no">error: '+esc(d.error)+'</div>';return;}
+  let h=flow('agent request','Aegis: ALLOW','exact q','live result')+'<div class="lbl">request (structured, no q code) → tool <code>'+esc(d.tool)+'</code></div><pre>'+esc(JSON.stringify(d.request))+'</pre>';
+  h+='<div class="lbl">the only q that runs</div><pre>'+esc(d.compiled)+'</pre>'+txblock(d);
+  h+='<div class="lbl">live on real data</div><pre>'+d.rows.toLocaleString()+' rows in '+d.ms+' ms</pre>';
+  h+='<div class="lbl">proof</div><div class="tx">'+esc(d.proof)+'</div>';
+  if(d.ref) h+='<div class="tx muted">reference: '+esc(d.ref)+'</div>';
+  if(d.note) h+='<div class="tx muted">note: '+esc(d.note)+'</div>';
+  h+='<div class="verdict '+(d.pass?'ok':'no')+'">'+(d.pass?'PASS':'FAIL')+'</div>';
+  $('sw_out').innerHTML=h;
+});
+
+// 2 — entitlement
+$('ent_btn').onclick=async()=>{
+  $('ent_spin').style.display='inline'; $('ent_out').innerHTML='';
+  const d=await post('/api/entitlement'); $('ent_spin').style.display='none';
+  if(d.error){$('ent_out').innerHTML='<div class="verdict no">error: '+esc(d.error)+'</div>';return;}
+  let h=flow('agent asks GOOG & NVDA','Aegis: ALLOW + inject entitlement','exact q','0 rows');
+  h+='<div class="lbl">request</div><pre>'+esc(JSON.stringify(d.request))+'</pre>';
+  h+='<div class="lbl">the only q that runs (note the TWO ANDed sym filters)</div><pre>'+esc(d.compiled)+'</pre>';
+  h+='<div class="tx"><code>sym in `GOOG`NVDA</code> is the agent filter; <code>sym in `AAPL`MSFT</code> is the mandatory entitlement. Intersection is empty.</div>';
+  h+='<div class="lbl">live on real data</div><pre>'+d.rows.toLocaleString()+' rows in '+d.ms+' ms</pre>';
+  h+='<div class="tx muted">control — are AAPL/GOOG/NVDA present in the data? '+esc(d.present)+' (they exist; 0 rows is the entitlement, not a typo)</div>';
+  h+='<div class="verdict '+(d.pass?'ok':'no')+'">'+(d.pass?'PASS — entitlement held: 0 rows, cannot be widened':'FAIL')+'</div>';
+  $('ent_out').innerHTML=h;
+};
+
+// 3 — free-form OK
+document.querySelectorAll('.fo').forEach(c=>c.onclick=async()=>{
+  $('fo_spin').style.display='inline'; $('fo_out').innerHTML='';
+  const d=await post('/api/freeform_ok',{case:c.dataset.c}); $('fo_spin').style.display='none';
+  if(d.error){$('fo_out').innerHTML='<div class="verdict no">error: '+esc(d.error)+'</div>';return;}
+  let h=flow('hand-written q','lift → structured request','RECOMPILE','live result');
+  h+='<div class="lbl">'+esc(d.title)+' — the agent\'s raw q</div><pre>'+esc(d.raw)+'</pre>';
+  h+='<div class="lbl">lifted to a structured request</div><pre>'+esc(JSON.stringify(d.lifted))+'</pre>';
+  h+='<div class="lbl">recompiled — the only q that runs (raw q never executed)</div><pre>'+esc(d.recompiled)+'</pre>'+txblock(d);
+  h+='<div class="lbl">live on real data</div><pre>'+d.rows.toLocaleString()+' rows in '+d.ms+' ms</pre>';
+  if(d.advisories&&d.advisories.length) h+='<div class="tx muted">advisory (logging only): '+esc(d.advisories.join('; '))+'</div>';
+  if(d.note) h+='<div class="tx muted">note: '+esc(d.note)+'</div>';
+  h+='<div class="verdict '+(d.pass?'ok':'no')+'">'+(d.pass?'PASS — recompiled q ran, raw q never touched kdb+':'FAIL')+'</div>';
+  $('fo_out').innerHTML=h;
+});
+
+// 3 — free-form BAD (which layer)
+document.querySelectorAll('.fb').forEach(c=>c.onclick=async()=>{
+  $('fb_out').innerHTML='<span class="muted">checking …</span>';
+  const d=await post('/api/freeform_bad',{case:c.dataset.c});
+  let h='<div class="lbl">'+esc(d.title)+' — the agent\'s raw q</div><pre>'+esc(d.raw)+'</pre>';
+  if(d.blocked){
+    h+='<div class="verdict no">REJECTED by the <span class="layer '+esc(d.layer)+'">'+esc(d.layer)+'</span> — raw q never ran<br><span class="muted">'+esc(d.reason)+'</span></div>';
+    h+='<div class="tx muted">'+esc(d.explain)+'</div>';
+  } else h+='<div class="verdict no">LEAKED (should not happen): '+esc(d.leaked)+'</div>';
+  $('fb_out').innerHTML=h;
+});
+
+// 4 — inexpressible
+document.querySelectorAll('.si').forEach(c=>c.onclick=async()=>{
+  $('si_spin').style.display='inline'; $('si_out').innerHTML='';
+  const d=await post('/api/safety_inexpressible',{case:c.dataset.c}); $('si_spin').style.display='none';
+  let h='<div class="lbl">the agent\'s raw q</div><pre>'+esc(d.q)+'</pre>';
+  if(d.blocked){h+='<div class="verdict no">REJECTED by the <span class="layer '+esc(d.layer)+'">'+esc(d.layer)+'</span><br><span class="muted">'+esc(d.reason)+'</span></div>';
+    h+='<div class="tx muted">'+esc(d.explain)+'</div>';}
+  else h+='<div class="verdict no">EXPRESSIBLE (should not happen)</div>';
+  $('si_out').innerHTML=h;
+});
+
+// 4 — cap
+$('cap_btn').onclick=async()=>{
+  $('si_spin').style.display='inline'; $('cap_out').innerHTML='';
+  const d=await post('/api/safety_cap'); $('si_spin').style.display='none';
+  if(d.error){$('cap_out').innerHTML='<div class="verdict no">error: '+esc(d.error)+'</div>';return;}
+  let h=flow('select from trade (unbounded)','Aegis: inject cap + entitlement','exact q','bounded result');
+  h+='<div class="lbl">the agent\'s raw q (no row filter, all columns)</div><pre>'+esc(d.raw)+'</pre>';
+  h+='<div class="lbl">recompiled — bounded</div><pre>'+esc(d.recompiled)+'</pre>'+txblock(d);
+  h+='<div class="lbl">live on real data</div><pre>partition holds '+d.partition_total.toLocaleString()+' rows; gate returned '+d.rows.toLocaleString()+' in '+d.ms+' ms (cap '+d.cap.toLocaleString()+')</pre>';
+  h+='<div class="tx muted">'+esc(d.explain)+'</div>';
+  h+='<div class="verdict '+(d.pass?'ok':'no')+'">'+(d.pass?'PASS — scan bounded by the cap; cannot OOM the box':'FAIL')+'</div>';
+  $('cap_out').innerHTML=h;
+};
+
+// 4 — structured-route rejections
+document.querySelectorAll('.sr').forEach(c=>c.onclick=async()=>{
+  $('sr_out').innerHTML='<span class="muted">validating …</span>';
+  const d=await post('/api/structured_reject',{case:c.dataset.c});
+  let h='<div class="lbl">'+esc(d.title)+' — request</div><pre>'+esc(JSON.stringify(d.request))+'</pre>';
+  h+='<div class="tx">as principal <code>'+esc(d.principal)+'</code>, validation step: <b>'+esc(d.step)+'</b></div>';
+  if(d.blocked) h+='<div class="verdict no">REJECTED, never reached kdb+<br><span class="muted">'+esc(d.reason)+'</span></div>';
+  else h+='<div class="verdict no">LEAKED (should not happen): '+esc(d.leaked)+'</div>';
+  $('sr_out').innerHTML=h;
+});
+
+// 5 — IFC
+document.querySelectorAll('.ic').forEach(c=>c.onclick=async()=>{
+  $('ic_out').innerHTML='<span class="muted">checking …</span>';
+  const d=await post('/api/ifc',{case:c.dataset.c});
+  let h='<div class="lbl">'+esc(d.title)+'</div>';
+  h+='<div class="tx">args derived from: <code>'+esc((d.items||[]).join(', '))+'</code>, joined integrity: <b>'+esc(d.integrity)+'</b></div>';
+  h+='<div class="verdict '+(d.verdict==='ALLOW'?'ok':'no')+'">IFC verdict: '+esc(d.verdict)+' (expected '+esc(d.expect)+')'+
+     (d.rule?'<br><span class="muted">'+esc(d.rule)+': '+esc(d.reason)+'</span>':'')+'</div>';
+  h+='<div class="verdict '+(d.pass?'ok':'no')+'">'+(d.pass?'PASS':'FAIL')+'</div>';
+  $('ic_out').innerHTML=h;
+});
+
+// 6 — the record
+$('rec_btn').onclick=async()=>{
+  $('rec_spin').style.display='inline'; $('rec_out').innerHTML='';
+  const d=await post('/api/record'); $('rec_spin').style.display='none';
+  if(d.error){$('rec_out').innerHTML='<div class="verdict no">error: '+esc(d.error)+'</div>';return;}
+  const p=d.policy,a=d.audit;
+  let h='<div class="lbl">signed policy</div>';
+  h+='<div class="kv"><b>'+esc(p.path)+'</b> — algo <code>'+esc(p.algo)+'</code>, key_id <code>'+esc(p.key_id)+'</code>, sha256 <code>'+esc(p.sha256)+'</code></div>';
+  h+='<div class="verdict '+(p.valid?'ok':'no')+'">signature '+(p.valid?'VALID':'INVALID')+' — '+esc(p.reason)+'</div>';
+  h+='<div class="verdict '+(!p.tamper_valid?'ok':'no')+'">tamper test (flip one policy byte): '+(p.tamper_valid?'STILL VALID (bad!)':'INVALID → gate fails closed')+'<br><span class="muted">'+esc(p.tamper_reason)+'</span></div>';
+  h+='<div class="lbl">WORM audit — '+a.entries+' entries, hash-chained</div>';
+  h+='<div class="verdict '+(a.chain_ok?'ok':'no')+'">chain '+(a.chain_ok?'INTACT':'BROKEN: '+esc(a.chain_err))+' · anchor: '+esc(a.anchor_msg)+'</div>';
+  if(a.tail&&a.tail.length){h+='<table class="aud"><tr><th>seq</th><th>tool</th><th>effect</th><th>principal</th><th>rules</th><th>entry_hash</th></tr>';
+    a.tail.forEach(e=>h+='<tr><td>'+e.seq+'</td><td>'+esc(e.tool)+'</td><td>'+esc(e.effect)+'</td><td>'+esc(e.principal)+'</td><td>'+esc((e.rules||[]).join(','))+'</td><td>'+esc(e.entry_hash)+'…</td></tr>');
+    h+='</table>';}
+  else h+='<div class="tx muted">no decisions recorded yet — trigger a few panels above, then re-open this.</div>';
+  h+='<div class="lbl">confinement</div><div class="tx muted">'+esc(d.confinement)+'</div>';
+  $('rec_out').innerHTML=h;
+};
+</script>
+</div></body></html>

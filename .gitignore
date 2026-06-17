@@ -6,6 +6,7 @@ build/
 dist/
 .maze/
 .aegis/
+.aegis-demo/
 *.audit.jsonl
 *.key
 # Built signed bundles contain a generated PRIVATE key — never commit them.
