@@ -51,6 +51,17 @@ _EXPR_OPS = {"add": "+", "sub": "-", "mul": "*", "div": "%"}
 # Allowlisted monadic running/window functions (each returns a column, bounded
 # by the same scan cap as the underlying select).
 _WIN_FNS = {"sums", "maxs", "mins", "prds", "deltas", "ratios", "reverse"}
+# Pure, side-effect-free element-wise predicates allowed as an agg modifier
+# (`sum null bid` = count of nulls — the common data-quality idiom). Each is a
+# total monadic with no I/O, no eval, no assignment — safe to emit verbatim.
+_AGG_MODIFIERS = {"null"}
+# Relative "now" support for recent-window filters (`time > .z.p - 0D00:05`).
+# Only PURE current-time/date reads are allowed, and the compiler emits the
+# function itself (never agent text); the timespan is re-validated here. So a
+# structured {now_minus|now, fn} value can express "last N minutes" but cannot
+# smuggle a side-effecting namespace call.
+_NOW_FN_RE = re.compile(r"^\.z\.[pPdDtTnzZ]$")
+_NOWSPAN_RE = re.compile(r"^(?:\d+D\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?|\d{2}:\d{2}(?::\d{2})?)$")
 # Monadic aggregations usable inside an expression node (dyadic wavg/wsum stay in
 # the `aggs` field). `countdistinct` is a named convenience for `count distinct`.
 _EXPR_AGGS = {"avg", "sum", "min", "max", "count", "first", "last",
@@ -153,6 +164,19 @@ class QueryCompiler:
 
     def _scalar(self, v) -> str:
         """Re-serialise a typed literal to q. Never interpolates caller text."""
+        if isinstance(v, dict):
+            # relative "now" value: {now_minus: <span>, fn: .z.p} or {now: true, fn}
+            fn = v.get("fn", ".z.p")
+            if not _NOW_FN_RE.match(str(fn)):
+                self._reject(f"unsupported now-function: {fn!r}")
+            if "now_minus" in v:
+                span = v["now_minus"]
+                if not isinstance(span, str) or not _NOWSPAN_RE.match(span):
+                    self._reject(f"invalid relative timespan: {span!r}")
+                return f"({fn} - {span})"
+            if v.get("now") is True:
+                return fn
+            self._reject(f"unsupported relative value: {v!r}")
         if isinstance(v, bool):
             return "1b" if v else "0b"
         if isinstance(v, int):
@@ -249,20 +273,30 @@ class QueryCompiler:
                     self._reject(f"aggregation '{fn}' not on the allowlist")
                 col = self._col(a["col"], cols_allowed) if a.get("col") is not None else None
                 weight = self._col(a["weight"], cols_allowed) if a.get("weight") is not None else None
+                # optional element-wise modifier applied to the column before the
+                # agg (e.g. `sum null bid` to count nulls). Allowlisted, pure.
+                of = a.get("of")
+                mod = ""
+                if of is not None:
+                    if of not in _AGG_MODIFIERS:
+                        self._reject(f"unsupported agg modifier 'of': {of!r}")
+                    mod = of + " "
                 if fn in ("wavg", "wsum"):              # dyadic: `weight wavg col`
                     if not (col and weight):
                         self._reject(f"'{fn}' requires both 'col' and 'weight' (e.g. size-weighted price)")
+                    if of is not None:
+                        self._reject(f"'of' modifier is not supported with '{fn}'")
                     body = f"{weight} {fn} {col}"
                 elif fn == "countdistinct":
                     if not col:
                         self._reject("countdistinct requires 'col'")
-                    body = f"count distinct {col}"
+                    body = f"count distinct {mod}{col}"
                 elif fn == "count":
-                    body = f"count {col}" if col else "count i"
-                else:                                   # monadic: `avg price`
+                    body = f"count {mod}{col}" if col else "count i"
+                else:                                   # monadic: `avg price`, `sum null bid`
                     if not col:
                         self._reject(f"aggregation '{fn}' requires 'col'")
-                    body = f"{fn} {col}"
+                    body = f"{fn} {mod}{col}"
                 alias = a.get("as")
                 if alias is not None:
                     if not _IDENT.match(str(alias)):

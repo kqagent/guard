@@ -46,8 +46,16 @@ _DATE = re.compile(r"^\d{4}\.\d{2}\.\d{2}$")
 
 # Tokenizer. Anything that falls to `other` (e.g. {, [, ], :, %, +, -, *, !, \,
 # @, .) is a token we don't allow in the safe subset -> the parse rejects.
+# Recent-window "now" support. `.z.p - 0D00:05` is matched as ONE token so the
+# bare '-' and '.' never enter the token stream (they stay rejected everywhere
+# else). Only pure current-time/date reads are recognised; the compiler
+# re-validates and emits the function itself. `nowrel` must precede `now`.
+_NOWFN = r"\.z\.[pPdDtTnzZ]"
+_SPAN = r"\d+D\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?|\d{2}:\d{2}(?::\d{2})?"
 _TOK = re.compile(r"""
     (?P<ws>\s+)
+  | (?P<nowrel>\.z\.[pPdDtTnzZ]\s*-\s*(?:\d+D\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?|\d{2}:\d{2}(?::\d{2})?))
+  | (?P<now>\.z\.[pPdDtTnzZ])
   | (?P<date>\d{4}\.\d{2}\.\d{2})
   | (?P<float>\d+\.\d+)
   | (?P<int>\d+)
@@ -115,6 +123,13 @@ def _value(toks: list[_Tok]):
     """Lift a scalar value token sequence to a Python value the compiler accepts."""
     if len(toks) == 1:
         t = toks[0]
+        if t.kind == "nowrel":            # `.z.p - 0D00:05` -> structured relative value
+            m = re.match(rf"({_NOWFN})\s*-\s*({_SPAN})$", t.val)
+            if not m:
+                raise FreeformRejected(f"malformed relative time: {t.val!r}")
+            return {"now_minus": m.group(2), "fn": m.group(1)}
+        if t.kind == "now":               # bare `.z.p`
+            return {"now": True, "fn": t.val}
         if t.kind == "date":
             return t.val
         if t.kind == "int":
@@ -170,6 +185,12 @@ def _parse_select_item(toks: list[_Tok], req: dict) -> None:
         return
     if words[0] == "count" and len(words) == 3 and words[1] == "distinct" and toks[2].kind == "word":
         req.setdefault("aggs", []).append({"fn": "countdistinct", "col": words[2], **({"as": alias} if alias else {})})
+        return
+    # agg over a null-predicate: `fn null col` (e.g. `sum null bid` counts nulls).
+    # `null` is the only allowed modifier; the compiler re-validates it.
+    if len(toks) == 3 and words[0] in _AGG and words[1] == "null" and toks[2].kind == "word":
+        req.setdefault("aggs", []).append({"fn": words[0], "col": words[2], "of": "null",
+                                           **({"as": alias} if alias else {})})
         return
     # monadic agg: fn col
     if len(toks) == 2 and words[0] in _AGG and toks[1].kind == "word":

@@ -40,7 +40,14 @@ ACCEPT = [
     "select avg_px:avg price, tot:sum size by sym from trade where date=2025.06.01",
     "select size wavg price by sym from trade where date=2025.06.01",
     "select count i by sym from trade where date=2025.06.01",
+    # data-quality idiom: count nulls per symbol (`sum null bid`) — the agent's
+    # real diagnostic query, lifted via the allowlisted `null` agg modifier.
+    "select count i, nb:sum null bid, na:sum null ask by sym from quote where date=2025.06.01",
     "select sym from trade where date within 2025.06.01 2025.06.03",
+    # recent-window "is it still happening?" diagnostic: the compiler emits .z.p
+    # itself and re-validates the timespan; only the bounded span comes from text.
+    "select sym, price from trade where date=2025.06.01, time > .z.p - 0D00:05",
+    "select sym, price from trade where date=2025.06.01, time within (.z.p - 0D01:00; .z.p)",
     "meta trade",
     "select sym, price from trade where sym in (`AAPL;`MSFT), date=2025.06.01",  # ';' inside list is fine
 ]
@@ -55,6 +62,12 @@ REJECT_LIFT = [
     "select {x} from trade where date=2025.06.01",                # brace -> reject
     "select .z.P from trade where date=2025.06.01",               # '.' -> reject
     "select sym from trade where price > (select max price from quote)",  # subquery value
+    'select sum null (system "id") by sym from trade where date=2025.06.01',  # null-modifier can't smuggle a call
+    "select sum evil bid by sym from trade where date=2025.06.01",            # unknown modifier word
+    'select sym from trade where date=2025.06.01, time > .z.p - (system "id")',  # now-arith can't smuggle a call
+    "select sym from trade where date=2025.06.01, time > .z.exit - 0D00:05",   # only pure now-reads allowed
+    "select .z.p from trade where date=2025.06.01",                            # bare .z.p as a column -> reject
+    "select sym from trade where date=2025.06.01, time > .z.p - 0D00:05*99",   # extra arithmetic -> reject
     "select sym from trade where date=2025.06.01 exit 0",         # trailing junk
     'hopen `:prod:5010',
     "exec sym from trade where date=2025.06.01",                  # exec changes result shape -> rejected
