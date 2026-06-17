@@ -314,7 +314,7 @@ def main() -> int:
     story += [P("7 &nbsp; How we tested it", "H"),
               P("Validated by deterministic, runnable proofs - not assertions."),
               bullets([
-                  "<b>Acceptance suite (CI-gated):</b> 32 core batteries on Python 3.10-3.12, a wheel "
+                  "<b>Acceptance suite (CI-gated):</b> 34 core batteries on Python 3.10-3.12, a wheel "
                   "fresh-install smoke test, the deployment-hardening gate, and ruff - every push.",
                   "<b>Formal:</b> the default-deny grant algebra proved sound &amp; monotonic by exhaustion "
                   "and by <b>Z3/SMT over unbounded domains</b>; AWS&rsquo;s open-source <b>Cedar Analysis CLI "
@@ -362,8 +362,11 @@ def main() -> int:
                   "(if realistic-scale) schema, plus a partial run of the AgentDojo benchmark. They prove the "
                   "design; they are <b>not</b> a production number. The control function must re-soak on the "
                   "<b>real desk corpus and real data</b> before enforcing - the one gate only they can close.",
-                  "The free-form (raw-q) surface exists only as <b>admin-only break-glass</b>, separately "
-                  "signed, never granted to an analyst; it is honestly weaker than the structured surface.",
+                  "The free-form (raw-q) surface is governed by <b>allowlist-on-parse</b>: a hand-written "
+                  "query is parsed, only the safe subset is accepted, and it is <b>recompiled through the "
+                  "trusted compiler</b> (the agent&rsquo;s raw q is never executed). Far stronger than a "
+                  "denylist, though the recognised grammar is a curated subset that grows - exotic q is "
+                  "rejected (safe) and routed to break-glass; caps + confinement wrap it regardless.",
                   "<b>Numeric overflow is the model&rsquo;s, not the gate&rsquo;s.</b> q <font face=\"Courier\">"
                   "sum</font> over a 64-bit integer column wraps silently; the compiler bounds which rows are "
                   "read and the result size, but does not widen aggregations. The conformance battery surfaces "
@@ -383,7 +386,7 @@ def main() -> int:
                 "bounded-by-construction query plane, mandatory row entitlements, deterministic "
                 "prompt-injection defense, kernel confinement (namespaces + Landlock + seccomp), two-tier "
                 "oversight + kill switch, signed out-of-process PDP with a policy-change guard, tamper-evident "
-                "WORM audit, installable package, CI-gated at 32/32."),
+                "WORM audit, installable package, CI-gated at 34/34."),
               P("<b>Remaining - the human gates (not code):</b>"),
               bullets([
                   "Control-function <b>real-data re-soak</b> (the authoring kit makes this turnkey).",

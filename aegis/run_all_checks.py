@@ -49,6 +49,7 @@ CORE = [
     ("policy_schema_diff_test", "policy-vs-schema drift linter: too-tight (lockout) + too-loose (scan) drift"),
     ("ifc_test", "information-flow control: untrusted tool output can't drive a privileged sink (prompt-injection)"),
     ("freeform_q_test", "free-form q: allowlist-on-parse, lift + recompile through the trusted compiler"),
+    ("query_gate_test", "single query chokepoint: structured + free-form routes, free-form kill-switch"),
 ]
 OPTIONAL = [
     ("verify_kdb_bridge", "bridges this repo's tools/gate.js (needs Node)"),

@@ -230,7 +230,7 @@ themselves.
 
 Aegis is validated by deterministic, runnable proofs - not assertions.
 
-- **Acceptance suite (CI-gated):** 32 core batteries (`python -m
+- **Acceptance suite (CI-gated):** 34 core batteries (`python -m
   aegis.run_all_checks`), run on Python 3.10-3.12, plus a wheel fresh-install
   smoke test, the deployment-hardening gate, and ruff - on every push.
 - **Formal:** the default-deny grant algebra is proved sound and monotonic by
@@ -308,9 +308,14 @@ Aegis is validated by deterministic, runnable proofs - not assertions.
   benchmark. They prove the design; they are **not** a production number. The
   control function must re-soak on the **real desk corpus and real data** before
   enforcing - the one gate only they can close.
-- The free-form (raw-q) surface still exists as **admin-only break-glass**,
-  separately signed, never granted to an analyst; it rests on the denylist +
-  confinement and is honestly weaker than the structured surface.
+- The free-form (raw-q) surface is governed by **allowlist-on-parse**: a
+  hand-written query is parsed, only the safe subset is accepted, and it is
+  **recompiled through the trusted compiler** (the agent's raw q is never
+  executed; only the compiler's output runs). This is far stronger than a
+  denylist, but the recognised grammar is a **curated subset that grows**, so
+  exotic-but-legitimate q is rejected (safe) and routed to admin break-glass. It
+  stays wrapped by caps + confinement; the structured surface remains the strong
+  guarantee.
 - **Numeric overflow is the model's, not the gate's.** q `sum` over a 64-bit
   integer column wraps silently; the compiler bounds *which rows* are read and
   *which result size* is returned, but it does not widen aggregations, so a sum
@@ -345,7 +350,7 @@ which Aegis therefore does not make, are flagged in that report.
 prompt-injection defense, kernel confinement (namespaces + Landlock + seccomp),
 two-tier oversight + kill switch, signed out-of-process PDP with a
 policy-change guard, tamper-evident WORM audit, installable package, CI-gated at
-32/32.
+34/34.
 
 **Remaining - the human gates (not code):**
 1. Control-function **real-data re-soak** (the authoring kit makes this turnkey).
