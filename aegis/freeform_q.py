@@ -247,7 +247,12 @@ def lift(qtext: str) -> dict:
 
     head = toks[0]
     if head.kind != "word" or head.val not in ("select", "exec", "meta"):
-        raise FreeformRejected("only select / exec / meta are allowed")
+        raise FreeformRejected("only select / meta are allowed")
+    # `exec` returns a flat list, not a table; the compiler only emits `select`, so
+    # lifting exec->select would silently change the RESULT SHAPE. Reject rather than
+    # run a non-equivalent query (we only ever run a semantically-equivalent safe q).
+    if head.val == "exec":
+        raise FreeformRejected("exec (flat-list result) is not in the safe subset yet - use select")
 
     if head.val == "meta":
         if len(toks) == 2 and toks[1].kind == "word":

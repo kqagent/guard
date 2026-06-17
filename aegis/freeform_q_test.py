@@ -41,7 +41,6 @@ ACCEPT = [
     "select size wavg price by sym from trade where date=2025.06.01",
     "select count i by sym from trade where date=2025.06.01",
     "select sym from trade where date within 2025.06.01 2025.06.03",
-    "exec sym from trade where date=2025.06.01",
     "meta trade",
     "select sym, price from trade where sym in (`AAPL;`MSFT), date=2025.06.01",  # ';' inside list is fine
 ]
@@ -58,6 +57,7 @@ REJECT_LIFT = [
     "select sym from trade where price > (select max price from quote)",  # subquery value
     "select sym from trade where date=2025.06.01 exit 0",         # trailing junk
     'hopen `:prod:5010',
+    "exec sym from trade where date=2025.06.01",                  # exec changes result shape -> rejected
 ]
 
 # LIFTS, but the COMPILER rejects it (off the allowlists / missing bound) - the
