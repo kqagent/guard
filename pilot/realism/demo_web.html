@@ -1,0 +1,157 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aegis, live guardrail on the real kdb+ estate</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:ital,wght@0,300;0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+@font-face{font-family:Farset_B;src:url(https://dataintellect.com/wp-content/themes/mammoth-tailwind2/fonts/farset_feirste/Farset_B.woff2) format("woff2"),url(https://dataintellect.com/wp-content/themes/mammoth-tailwind2/fonts/farset_feirste/Farset_B.woff) format("woff");font-weight:400;font-display:swap}
+:root{--bg:#ffffff;--panel:#ffffff;--panel2:#f7f7f5;--line:#e5e7eb;--txt:#111111;--mut:#6b7280;--grn:#1a7f37;--red:#c0392b;--amb:#9a6b00;--blu:#2563eb;--accent:#ffc72c;--accent-soft:#fff7e0;
+--head:Farset_B,'Roboto Condensed',sans-serif;--body:'Roboto Condensed',system-ui,-apple-system,Segoe UI,sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.55 var(--body)}
+.wrap{max-width:1080px;margin:0 auto;padding:0 20px 90px}
+.di-bar{display:flex;align-items:center;gap:14px;border-bottom:3px solid var(--accent);padding:16px 0 12px;margin-bottom:22px}
+.di-bar img{height:30px;display:block}
+.di-bar .pname{font-family:var(--head);font-size:20px;font-weight:400;letter-spacing:.02em;color:#000;padding-left:14px;border-left:1px solid var(--line)}
+.di-bar .pname b{color:var(--accent);-webkit-text-stroke:.3px #caa000}
+h1{font-family:var(--head);font-size:25px;font-weight:400;margin:0 0 4px;letter-spacing:.01em}.spark{color:#000;border-bottom:3px solid var(--accent)}
+.sub{color:var(--mut);margin:0 0 16px}
+.live{display:inline-block;background:var(--accent-soft);color:#8a5a00;border:1px solid var(--accent);border-radius:4px;padding:3px 10px;font-size:12px;font-weight:700;margin-bottom:14px;text-transform:uppercase;letter-spacing:.04em}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:14px 0;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.step{color:#000;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin:0 0 8px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 6px}
+.chip{background:#fff;border:1px solid var(--line);color:var(--txt);border-radius:4px;padding:6px 12px;font-size:13px;cursor:pointer;font-family:var(--body)}
+.chip:hover{border-color:var(--accent);background:var(--accent-soft)}
+.muted{color:var(--mut);font-size:13px}
+code{background:var(--panel2);border:1px solid var(--line);border-radius:3px;padding:1px 5px;font:12.5px ui-monospace,Menlo,Consolas,monospace}
+pre{white-space:pre-wrap;margin:6px 0 0;font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;color:#1a1a1a;background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:4px;padding:9px 11px}
+.lbl{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-top:10px;font-weight:700}
+.tx{font-size:12.5px;color:#333;margin:3px 0 0 12px}
+.tx b{color:var(--amb)}
+.verdict{font-weight:700;font-size:15px;padding:9px 13px;border-radius:4px;margin:10px 0}
+.ok{background:#e7f6ec;border:1px solid var(--grn);color:#13632b}
+.no{background:#fdecea;border:1px solid var(--red);color:#962419}
+.spin{display:none;color:var(--mut)}
+.hd{color:var(--blu);font-weight:600}
+</style></head><body><div class="wrap">
+
+<div class="di-bar">
+  <img src="https://dataintellect.com/wp-content/themes/mammoth-tailwind2/images/di_logo_black.svg" alt="Data Intellect">
+  <span class="pname"><b>Aegis</b> guardrail</span>
+</div>
+
+<h1>Aegis, <span class="spark">live guardrail on the real kdb+ estate</span></h1>
+<div class="live">Real execution, nothing is pre-recorded</div>
+<p class="sub">Every button below runs live against a real 4 billion row kdb+ database
+(<code>~/aegis-hdb/fsp1</code>, 50 partitions of 10M rows). The agent never sends q code; it sends
+a structured request, and the compiler (loaded from the real policy) validates every field,
+injects the mandatory bounds and this analyst's row entitlement, and emits the only q that runs,
+or refuses. Principal: <code>analyst-equities</code>, entitled to <code>sym in AAPL,MSFT</code>.</p>
+
+<div class="card">
+  <div class="step">1, should work: compiled and executed on the live HDB</div>
+  <div class="chips">
+    <span class="chip sw" data-c="filter">Filtered raw select</span>
+    <span class="chip sw" data-c="agg">Aggregation by sym</span>
+    <span class="chip sw" data-c="topn">Top 10 by price</span>
+    <span class="chip sw" data-c="vwap">VWAP by sym</span>
+    <span class="chip sw" data-c="asof">As-of join (slow, honest)</span>
+  </div>
+  <span class="spin" id="sw_spin">compiling and executing on the live HDB ...</span>
+  <div id="sw_out"></div>
+</div>
+
+<div class="card">
+  <div class="step">2, should not work: refused by the compiler, never reaches kdb+</div>
+  <div class="chips">
+    <span class="chip sn" data-c="table">Bad table</span>
+    <span class="chip sn" data-c="column">Bad column</span>
+    <span class="chip sn" data-c="nodate">Missing date</span>
+    <span class="chip sn" data-c="span">Over the span cap</span>
+    <span class="chip sn" data-c="injval">Injection in a value</span>
+    <span class="chip sn" data-c="injcol">Injection in a column</span>
+    <span class="chip sn" data-c="meta">Meta, un-entitled</span>
+  </div>
+  <span class="spin" id="sn_spin">validating ...</span>
+  <div id="sn_out"></div>
+</div>
+
+<div class="card">
+  <div class="step">3, entitlement cannot be widened (proven on real data)</div>
+  <div class="muted"><code>analyst-equities</code> explicitly asks for GOOG and NVDA (which exist in the data).
+    The compiled q carries both the agent filter and the mandatory entitlement filter; their intersection is empty.</div>
+  <div class="chips" style="margin-top:8px"><span class="chip" id="ent_btn">Ask for GOOG and NVDA, run it live</span></div>
+  <span class="spin" id="ent_spin">executing on the live HDB ...</span>
+  <div id="ent_out"></div>
+</div>
+
+<div class="card">
+  <div class="step">4, injection defence (IFC), deterministic and content independent</div>
+  <div class="muted">A privileged sink (<code>submit_order</code>) is vetoed when its arguments derive from
+    untrusted content (a poisoned tool result), regardless of wording. Labels JOIN, untrusted wins.</div>
+  <div class="chips" style="margin-top:8px">
+    <span class="chip ic" data-c="trusted">Trusted instruction</span>
+    <span class="chip ic" data-c="untrusted">Poisoned tool result</span>
+    <span class="chip ic" data-c="mixed">Trusted + untrusted mixed</span>
+  </div>
+  <div id="ic_out"></div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+function esc(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+async function post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});return r.json();}
+
+document.querySelectorAll('.sw').forEach(c=>c.onclick=async()=>{
+  $('sw_spin').style.display='inline'; $('sw_out').innerHTML='';
+  const d=await post('/api/should_work',{case:c.dataset.c});
+  $('sw_spin').style.display='none';
+  if(d.error){$('sw_out').innerHTML='<div class="verdict no">error: '+esc(d.error)+'</div>';return;}
+  let h='<div class="lbl">what the analyst asked (structured, no q code)</div><pre>'+esc(JSON.stringify(d.request))+'</pre>';
+  h+='<div class="lbl">what the gate emitted (the only q that runs)</div><pre>'+esc(d.compiled)+'</pre>';
+  if(d.transforms&&d.transforms.length){h+='<div class="lbl">what the gate added under the hood</div>';
+    d.transforms.forEach(t=>h+='<div class="tx"><b>'+esc(t[0])+'</b> &nbsp;<code>'+esc(t[1])+'</code><br><span class="muted">'+esc(t[2])+'</span></div>');}
+  h+='<div class="lbl">live on real data</div><pre>'+d.rows.toLocaleString()+' rows in '+d.ms+' ms</pre>';
+  h+='<div class="lbl">proof</div><div class="tx">'+esc(d.proof)+'</div>';
+  if(d.ref) h+='<div class="tx muted">reference: '+esc(d.ref)+'</div>';
+  if(d.note) h+='<div class="tx muted">note: '+esc(d.note)+'</div>';
+  h+='<div class="verdict '+(d.pass?'ok':'no')+'">'+(d.pass?'PASS':'FAIL')+'</div>';
+  $('sw_out').innerHTML=h;
+});
+
+document.querySelectorAll('.sn').forEach(c=>c.onclick=async()=>{
+  $('sn_spin').style.display='inline'; $('sn_out').innerHTML='';
+  const d=await post('/api/should_not',{case:c.dataset.c});
+  $('sn_spin').style.display='none';
+  let h='<div class="lbl">what was asked</div><pre>'+esc(JSON.stringify(d.request))+'</pre>';
+  h+='<div class="tx">as principal <code>'+esc(d.principal)+'</code>, validation step: <b>'+esc(d.step)+'</b></div>';
+  if(d.blocked) h+='<div class="verdict no">REJECTED, never reached kdb+<br><span class="muted">'+esc(d.reason)+'</span></div>';
+  else h+='<div class="verdict no">LEAKED (should not happen): '+esc(d.leaked)+'</div>';
+  $('sn_out').innerHTML=h;
+});
+
+$('ent_btn').onclick=async()=>{
+  $('ent_spin').style.display='inline'; $('ent_out').innerHTML='';
+  const d=await post('/api/entitlement',{});
+  $('ent_spin').style.display='none';
+  if(d.error){$('ent_out').innerHTML='<div class="verdict no">error: '+esc(d.error)+'</div>';return;}
+  let h='<div class="lbl">what the gate emitted (note the TWO ANDed sym filters)</div><pre>'+esc(d.compiled)+'</pre>';
+  h+='<div class="tx"><code>sym in `GOOG`NVDA</code> is the agent filter; <code>sym in `AAPL`MSFT</code> is the mandatory entitlement. Intersection is empty.</div>';
+  h+='<div class="lbl">live on real data</div><pre>'+d.rows.toLocaleString()+' rows in '+d.ms+' ms</pre>';
+  h+='<div class="tx muted">control, are AAPL/GOOG/NVDA present in the data? '+esc(d.present)+' (they exist; 0 rows is the entitlement, not a typo)</div>';
+  h+='<div class="verdict '+(d.pass?'ok':'no')+'">'+(d.pass?'PASS, entitlement held: 0 rows, cannot be widened':'FAIL')+'</div>';
+  $('ent_out').innerHTML=h;
+};
+
+document.querySelectorAll('.ic').forEach(c=>c.onclick=async()=>{
+  $('ic_out').innerHTML='<span class="muted">checking ...</span>';
+  const d=await post('/api/ifc',{case:c.dataset.c});
+  let h='<div class="lbl">'+esc(d.title)+'</div>';
+  h+='<div class="tx">args derived from: <code>'+esc((d.items||[]).join(', '))+'</code>, joined integrity: <b>'+esc(d.integrity)+'</b></div>';
+  h+='<div class="verdict '+(d.verdict==='ALLOW'?'ok':'no')+'">IFC verdict: '+esc(d.verdict)+' (expected '+esc(d.expect)+')'+
+     (d.rule?'<br><span class="muted">'+esc(d.rule)+': '+esc(d.reason)+'</span>':'')+'</div>';
+  h+='<div class="verdict '+(d.pass?'ok':'no')+'">'+(d.pass?'PASS':'FAIL')+'</div>';
+  $('ic_out').innerHTML=h;
+});
+</script>
+</div></body></html>
