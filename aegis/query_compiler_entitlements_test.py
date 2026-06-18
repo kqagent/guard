@@ -120,8 +120,17 @@ def run() -> int:
     check("12 raw select over 20-day range > span cap 5 -> REJECT", out is None and "spans" in (err or ""), err)
     out, _ = compiles(qspan, {"table": "trade", "columns": ["sym"], "date": {"from": "2025.06.01", "to": "2025.06.03"}}, None)
     check("13 raw select within span cap -> OK", out is not None, err)
-    out, _ = compiles(qspan, {"table": "trade", "aggs": [{"fn": "count", "as": "n"}], "date": {"from": "2025.06.01", "to": "2025.06.30"}}, None)
-    check("14 REDUCING query over wide range -> OK (exempt from span cap)", out is not None, "reducing must not be span-capped")
+    # 14. A reducing query over a wide date range is ALSO span-capped: the span
+    #     cap bounds the number of PARTITIONS read off disk, which a reducing
+    #     query does just as much as a raw listing (the result cap only trims
+    #     output, it does not bound the scan). Adversarial audit found the old
+    #     "reducing exempt" behaviour to be a resource/DoS vector. (The `i<N`
+    #     materialisation cap is still correctly omitted for reducing queries —
+    #     that one would corrupt the aggregation; the span cap does not.)
+    out, err = compiles(qspan, {"table": "trade", "aggs": [{"fn": "count", "as": "n"}], "date": {"from": "2025.06.01", "to": "2025.06.30"}}, None)
+    check("14 REDUCING query over wide range -> REJECT (span cap applies to scans)", out is None and "spans" in (err or ""), err or out)
+    out, err = compiles(qspan, {"table": "trade", "aggs": [{"fn": "count", "as": "n"}], "date": {"from": "2025.06.01", "to": "2025.06.03"}}, None)
+    check("14b REDUCING query within span cap -> OK", out is not None, err)
 
     # --- review fixes: combine `*`+table, and gate `meta` -------------------
     # 15. `*` baseline AND table-specific must BOTH apply (no widening by table

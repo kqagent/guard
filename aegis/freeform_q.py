@@ -186,6 +186,10 @@ def _parse_select_item(toks: list[_Tok], req: dict) -> None:
     if words[0] == "count" and len(words) == 3 and words[1] == "distinct" and toks[2].kind == "word":
         req.setdefault("aggs", []).append({"fn": "countdistinct", "col": words[2], **({"as": alias} if alias else {})})
         return
+    # single-token spelling: `countdistinct col` (the policy advertises this fn)
+    if words[0] == "countdistinct" and len(words) == 2 and toks[1].kind == "word":
+        req.setdefault("aggs", []).append({"fn": "countdistinct", "col": words[1], **({"as": alias} if alias else {})})
+        return
     # agg over a null-predicate: `fn null col` (e.g. `sum null bid` counts nulls).
     # `null` is the only allowed modifier; the compiler re-validates it.
     if len(toks) == 3 and words[0] in _AGG and words[1] == "null" and toks[2].kind == "word":

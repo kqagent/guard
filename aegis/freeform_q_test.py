@@ -40,6 +40,7 @@ ACCEPT = [
     "select avg_px:avg price, tot:sum size by sym from trade where date=2025.06.01",
     "select size wavg price by sym from trade where date=2025.06.01",
     "select count i by sym from trade where date=2025.06.01",
+    "select countdistinct sym from trade where date=2025.06.01",  # single-token countdistinct lifts
     # data-quality idiom: count nulls per symbol (`sum null bid`) — the agent's
     # real diagnostic query, lifted via the allowlisted `null` agg modifier.
     "select count i, nb:sum null bid, na:sum null ask by sym from quote where date=2025.06.01",
@@ -79,6 +80,9 @@ REJECT_COMPILE = [
     "select sym from trade",                                 # partitioned, no date
     "select sym, secret from trade where date=2025.06.01",   # column not on allowlist
     "select sym from positions where date=2025.06.01",       # table not on allowlist
+    # recent-window magnitude cap: a huge `.z.p - <days>D` span would match all
+    # history (defeating the bound) -> rejected by the compiler.
+    "select sym from trade where date=2025.06.01, time > .z.p - 9999999D00:00",
 ]
 
 

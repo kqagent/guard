@@ -173,6 +173,16 @@ class QueryCompiler:
                 span = v["now_minus"]
                 if not isinstance(span, str) or not _NOWSPAN_RE.match(span):
                     self._reject(f"invalid relative timespan: {span!r}")
+                # MAGNITUDE cap: a `time > .z.p - <span>` window only bounds the
+                # scan if the span is small. `.z.p - 9999999D00:00` matches all
+                # history, defeating the point. Cap the day-count (the only
+                # unbounded field — hh:mm:ss are 2-digit) to max_partition_span
+                # days when set, else a sane default.
+                cap_days = self.max_partition_span or 31
+                days = int(span.split("D", 1)[0]) if "D" in span else 0
+                if days > cap_days:
+                    self._reject(f"relative time window of {days} days exceeds the "
+                                 f"{cap_days}-day limit — narrow the window")
                 return f"({fn} - {span})"
             if v.get("now") is True:
                 return fn
@@ -490,12 +500,16 @@ class QueryCompiler:
         return out
 
     def _max_span_check(self, req: dict, table: str) -> None:
-        """Raw-select date-range cap: a RAW row-listing whose date range spans more
-        than max_partition_span days is rejected — bounds materialisation globally
-        (a raw listing reads up to max_rows PER partition). Reducing queries
-        (aggs/by/distinct) are exempt: they must read their input and their result
-        is already result-capped."""
-        if not self.max_partition_span or self._reduces(req):
+        """Date-range cap: a query whose date range spans more than
+        max_partition_span days is rejected. This bounds the number of PARTITIONS
+        a query may read off disk and therefore applies to EVERY query, reducing
+        or not — a `select avg ... by sym where date within 2000.01.01 2030.12.31`
+        scans every partition in the window just as a raw listing would, and the
+        result-row cap does nothing to bound that scan (it only trims the output).
+        (The `i<N` materialisation cap is still omitted for reducing queries in
+        `_where_expr`, because that one WOULD corrupt an aggregation; the span cap
+        does not — it bounds the partition range, not the per-partition rows.)"""
+        if not self.max_partition_span:
             return
         date = req.get("date")
         if not isinstance(date, dict):
@@ -506,8 +520,8 @@ class QueryCompiler:
         from datetime import date as _d
         span = (_d(*map(int, d_to.split("."))) - _d(*map(int, d_from.split("."))))
         if span.days + 1 > self.max_partition_span:
-            self._reject(f"raw row-listing date range spans {span.days + 1} days "
-                         f"(max {self.max_partition_span}) — narrow the range or use an aggregation")
+            self._reject(f"date range spans {span.days + 1} days "
+                         f"(max {self.max_partition_span}) — narrow the range")
 
     def _compile_select(self, req: dict, principal=None) -> str:
         table = self._table(req.get("table"))
