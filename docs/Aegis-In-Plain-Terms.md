@@ -7,9 +7,9 @@ The AI can *write* q, but that text never reaches the database. Aegis parses it 
 
 ## The flow of one query
 1. You ask the chatbot a question. **Claude (the LLM)** writes some q and asks to run a **tool**.
-2. Aegis intercepts before anything executes (`server.py:_run_tool` → `govern`).
-3. **q → Python:** `lift()` parses the q *string* into a structured dictionary — `{table, columns, aggs, where}`. Any off-menu token (`delete`, `.`, `[`, `;`) → it can't be placed on the ticket → **refused**.
-4. **Python → q:** `compile()` checks every field against the menu and **writes a brand-new q string**, stamping on the safety bounds (row cap, date-first). Values are re-serialised *by type*, so text can never become code.
+2. Aegis intercepts before anything executes (`server.py:_run_tool` -> `govern`).
+3. **q -> Python:** `lift()` parses the q *string* into a structured dictionary — `{table, columns, aggs, where}`. Any off-menu token (`delete`, `.`, `[`, `;`) -> it can't be placed on the ticket -> **refused**.
+4. **Python -> q:** `compile()` checks every field against the menu and **writes a brand-new q string**, stamping on the safety bounds (row cap, date-first). Values are re-serialised *by type*, so text can never become code.
 5. **Run:** only the rebuilt string is sent to kdb+ via **PyKX**. **kdb+ executes it — not Python.** PyKX returns the result as a table.
 
 > PyKX is only the *pipe* to kdb+ at step 5. The gate itself (lift + compile) is pure Python string work — no PyKX, no execution.
@@ -28,7 +28,7 @@ Every query that reaches kdb+ is, **by construction:**
 - **bounded** — caps are auto-added, so a query can't run away and OOM the box;
 - **injection-proof** — values re-typed, so a string can't smuggle code.
 
-**Fail-closed:** any error or ambiguity → block. And because the AI's raw text is *never executed* — only Aegis's rebuild — even a parser bug can at worst *refuse*, never run something dangerous.
+**Fail-closed:** any error or ambiguity -> block. And because the AI's raw text is *never executed* — only Aegis's rebuild — even a parser bug can at worst *refuse*, never run something dangerous.
 
 ## What it is NOT (honest limits)
 - **Not a correctness oracle** — it guarantees *safe*, not *right*. The AI can still write a valid query and draw a wrong conclusion.
@@ -37,4 +37,4 @@ Every query that reaches kdb+ is, **by construction:**
 
 ---
 
-**One line:** *Read the intent → rebuild it from a safe menu (plus bounds) → run only the rebuild; refuse anything off-menu. The menu is JSON you edit; the query shapes are code you extend with tests.*
+**One line:** *Read the intent -> rebuild it from a safe menu (plus bounds) -> run only the rebuild; refuse anything off-menu. The menu is JSON you edit; the query shapes are code you extend with tests.*
