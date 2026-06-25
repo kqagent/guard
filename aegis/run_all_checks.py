@@ -50,6 +50,7 @@ CORE = [
     ("ifc_test", "information-flow control: untrusted tool output can't drive a privileged sink (prompt-injection)"),
     ("freeform_q_test", "free-form q: allowlist-on-parse, lift + recompile through the trusted compiler"),
     ("query_gate_test", "single query chokepoint: structured + free-form routes, free-form kill-switch"),
+    ("widen_from_log_test", "widen-from-audit CLI: group blocked attempts + classify grant candidates (widening needs sign-off)"),
 ]
 OPTIONAL = [
     ("verify_kdb_bridge", "bridges this repo's tools/gate.js (needs Node)"),
