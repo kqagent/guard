@@ -81,6 +81,14 @@ class QueryCompiler:
         c = config or {}
         self.allowed_tables = {t.lower() for t in c.get("allowed_tables", [])}
         self.require_date_tables = {t.lower() for t in c.get("require_date_tables", [])}
+        # Per-table process kind: "hdb" (date-partitioned) or "rdb" (real-time, no
+        # date column). Drives schema-aware bounding in _where_expr: HDB keeps the
+        # date predicate; RDB rejects a date filter and is bounded by a recent
+        # time-window (`rdb_window`, a q timespan literal e.g. "0D01:00:00") on
+        # `time_col`. Absent -> legacy behaviour (date logic only); backward-compatible.
+        self.table_kind = {t.lower(): str(k).lower() for t, k in (c.get("table_kind") or {}).items()}
+        self.rdb_window = c.get("rdb_window")          # None -> no RDB time bound
+        self.time_col = c.get("time_col", "time")
         self.max_rows = int(c.get("max_rows", 1_000_000))
         # Per-table column allowlist (new). Without it, no columns can be named.
         self.columns = {k.lower(): {col.lower() for col in v}
@@ -413,21 +421,33 @@ class QueryCompiler:
 
     def _where_expr(self, req: dict, table: str, cols_allowed: set, principal=None) -> str:
         preds = []
-        # date predicate (required for partitioned tables)
+        kind = self.table_kind.get(table.lower())
         date = req.get("date")
-        if date is not None:
-            if not isinstance(date, dict):
-                self._reject("date must be an object {from,to}")
-            d_from, d_to = date.get("from"), date.get("to")
-            for d in (d_from, d_to):
-                if d is not None and not (isinstance(d, str) and _DATE.match(d)):
-                    self._reject(f"invalid date literal: {d!r}")
-            if d_from and d_to and d_from != d_to:
-                preds.append(f"date within {d_from} {d_to}")
-            elif d_from or d_to:
-                preds.append(f"date={d_from or d_to}")
-        elif table.lower() in self.require_date_tables:
-            self._reject(f"table '{table}' is partitioned — a date range is required")
+        if kind == "rdb":
+            # Real-time (RDB) table: no `date` column. A date filter would type-error
+            # at runtime, so reject it; bound the scan with a recent time-window
+            # instead (policy-configured; tight in production).
+            if date is not None:
+                self._reject(f"table '{table}' is a real-time (RDB) table with no date "
+                             f"column — a date filter is not valid here; it is bounded by a "
+                             f"recent time-window")
+            if self.rdb_window:
+                preds.append(f"{self.time_col} > .z.p - {self.rdb_window}")
+        else:
+            # Partitioned (HDB) or unspecified: date predicate (required for partitioned).
+            if date is not None:
+                if not isinstance(date, dict):
+                    self._reject("date must be an object {from,to}")
+                d_from, d_to = date.get("from"), date.get("to")
+                for d in (d_from, d_to):
+                    if d is not None and not (isinstance(d, str) and _DATE.match(d)):
+                        self._reject(f"invalid date literal: {d!r}")
+                if d_from and d_to and d_from != d_to:
+                    preds.append(f"date within {d_from} {d_to}")
+                elif d_from or d_to:
+                    preds.append(f"date={d_from or d_to}")
+            elif table.lower() in self.require_date_tables:
+                self._reject(f"table '{table}' is partitioned — a date range is required")
 
         # structured filters (the agent's own)
         for f in self._list(req.get("filters", []) or [], "filters"):
