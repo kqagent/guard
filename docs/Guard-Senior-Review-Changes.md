@@ -25,6 +25,28 @@ deployment/platform property we must not claim as gate code no matter what we bu
 
 ---
 
+## Resolution status (homer side — TorQ-ops chat gate)
+
+Ground-truthed against the live homer integration and resolved each inconsistency by
+**implementing it** (claim now verifiable) or **reframing the brief** (deploy property /
+scope). The brief (`TorQ-Ops-x-Guard-brief.pdf`) now claims only what's verifiable.
+
+| # | Item | What we did on homer |
+|---|---|---|
+| — | **Signed policy** | **IMPLEMENTED.** ed25519-signed chat policies; the gate verifies each detached `.sig` against a pinned pubkey *before* loading compiler/engine; a 1-byte tamper -> gate fails closed (every query/action blocked). Per-stack policies verified too. Private key offline/gitignored. (`aegis_gate.py`, `aegis_policy.*.json.sig`) |
+| — | **Watchdog** | **IMPLEMENTED.** Supervisor enabled (`repeated_blocks max_blocks=5`); every gate decision fed to `supervisor.observe`, `is_tripped` checked in `govern`. Verified: 5 blocks trip the persisted breaker, which then halts the agent (blocks even benign calls) until reset. |
+| 3 | Feedback on a "no" | **CLAIM NOW** — structured reason+layer+remediation reaches the LLM and it adapts. (Minor tidy: also populate `Finding.remediation`.) |
+| 4 | Customise knobs | Tools/data/**column allowlist (on the free-form route too)**/rows/caps/audit = **gate code here**. OS/network/process confinement = **reframed in brief as the operator's deployment layer Guard validates** (not gate code). |
+| 1 | Confinement | Brief **scoped** to the verifiable mechanism: the chat agent is an LLM that holds no handle/shell/socket and only emits proposals; the server routes every call through Guard, fail-closed. **REMAINING BUILD:** the *autonomous* agent (`python/agent/tools.py run_kdb_query`) still queries kdb+ ungated — route it through the gate, or keep claims scoped to the chat agent. |
+| 2 | Schema-aware bounding (RDB vs HDB) | **REMAINING BUILD.** On homer it works by config (RDB tables simply aren't in `require_date_tables`), not by table-kind awareness. Add `table_kind` + RDB time-window per the plan below. |
+| 5 | Rollout | Monitor/shadow mode exists in the engine (CLAIM NOW for the engine). **REMAINING:** expose an `AEGIS_MODE=monitor` knob in the deployment + `widen_from_log.py` CLI. |
+
+**Net:** the two headline over-claims (signed policy, watchdog) are now true and tested;
+the rest are either verified-and-kept or honestly reframed in the brief. Open builds:
+agent-side query gating (#1), schema-aware RDB bounding (#2), monitor-mode knob + widen CLI (#5).
+
+---
+
 ## 1. Confinement - "the agent can't bypass Guard to reach kdb+" (the senior's main point)
 
 **Finding.** Not true today. The query proxy (`query_proxy.py` `QueryGuard`) is a pure in-process Python
