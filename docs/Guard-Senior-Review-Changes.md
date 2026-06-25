@@ -45,6 +45,34 @@ scope). The brief (`TorQ-Ops-x-Guard-brief.pdf`) now claims only what's verifiab
 the rest are either verified-and-kept or honestly reframed in the brief. Open builds:
 agent-side query gating (#1), schema-aware RDB bounding (#2), monitor-mode knob + widen CLI (#5).
 
+### Brief contradiction sweep (2026-06-25, laptop side)
+
+Ran a verified sweep of the current `TorQ-Ops-x-Guard-brief.pdf` against the senior's five
+points + an internal-consistency pass, then applied the fixes to `build_guard_brief_pdf.py`
+and regenerated the PDF. Edits made: (A) the "Compile" stage bullet said *"adding the row cap
+and date bound"* unconditionally - a hard self-contradiction with the RDB worked example two
+paragraphs up; replaced with storage-aware wording (date for HDB, time-window for RDB). (B)
+added an agent-side feedback-loop sentence (a block returns the reason so the agent can revise)
+and scoped the watchdog so ordinary revise-and-retry does not read as the halt trigger. (C)
+reframed "What You Can Customise" as a proposed approach rather than a shipped product
+("is meant to adapt", "The intent is that one engine ...") plus an up-front scope line. (D)
+added the senior's "start with a narrow allow-list and widen" framing to the Rollout bullet.
+Also softened "the model holds no handle" -> "is given no handle" (deployment-conferred, not an
+inherent guarantee).
+
+**Two follow-ups land on homer, not the brief:**
+1. **RDB schema-aware bound is now in the laptop compiler but UNTESTED.** `aegis/query_compiler.py`
+   (`table_kind`/`rdb_window`/`time_col`, lines ~84-91 and ~422-435) genuinely rejects a date
+   filter against an RDB table and stamps `time_col > .z.p - rdb_window` - so the brief's
+   *"would reject a date filter against this table outright"* is code-backed and was kept. But
+   `"rdb"`/`table_kind` appears in zero tests. Add a `query_compiler_test.py` case:
+   `table_kind:"rdb"` + a `date` -> REJECT; and -> `time > .z.p - window` with no `date=`. Note:
+   this diverges from the homer integration, where RDB handling is still by-config (RDB tables
+   simply absent from `require_date_tables`), not table-kind aware - reconcile the two.
+2. **Autonomous-agent path still ungated** (`python/agent/tools.py run_kdb_query`, homer side).
+   The brief's "no handle" claim is honest only for the chat agent; either route the autonomous
+   agent through the gate or keep brief claims scoped to the chat agent.
+
 ---
 
 ## 1. Confinement - "the agent can't bypass Guard to reach kdb+" (the senior's main point)

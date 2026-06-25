@@ -180,14 +180,18 @@ def main() -> int:
              "production. Telling it to &ldquo;be careful&rdquo; is not a control."),
            P("This brief is for teams whose support already has some hands-on access to live processes - given a "
              "handle, told to be careful, left to learn as they go. (If your agents have no real access yet, you do "
-             "not have this problem.) It is how we keep that access safe: the model can propose, but Guard decides.")]
+             "not have this problem.) It is how we keep that access safe: the model can propose, but Guard decides. "
+             "What follows is the approach we are proposing, and an honest account of where it holds and where it "
+             "does not yet.")]
 
     # Guard in one sentence
     st += [P("Guard in One Sentence", "H"),
            P("Guard is a deterministic checkpoint between an AI agent and the systems it can touch.", "Lede"),
            P("It works in three plain steps: the agent <b>proposes</b> an action; Guard <b>checks</b> it against a "
              "fixed policy and answers allow, ask-a-human, or block; and only an <b>approved</b> action is actually "
-             "run. The agent never reaches the system directly."),
+             "run. The agent never reaches the system directly. A block is not a dead end: Guard hands back the "
+             "reason - which rule tripped, and what would be allowed instead - so the agent can revise its proposal "
+             "and try again within the rules."),
            Spacer(1, 1 * mm),
            code(["decision = guard.check(tool_name, tool_args, principal=user_id)",
                  "if decision.effect == \"block\":",
@@ -222,10 +226,10 @@ def main() -> int:
                "tool calls are permission-checked, with risky ones held for approval (in the gate); and network "
                "egress is confined to allow-listed destinations by Guard's egress proxy where the operator deploys "
                "it - the platform layer covered under Deployment boundary below.",
-               "<b>Audit + watchdog</b> - every decision is logged, and a run of blocked attempts trips a breaker "
-               "that halts the agent.",
-               "<b>The boundary</b> - the model holds no database handle, shell or socket of its own; it only emits "
-               "proposals, and the server runs every one through Guard first.",
+               "<b>Audit + watchdog</b> - every decision is logged, and repeated refusals that keep failing the "
+               "same way trip a breaker that halts the agent.",
+               "<b>The boundary</b> - the model is given no database handle, shell or socket of its own; it only "
+               "emits proposals, and the server runs every one through Guard first.",
            ])]
 
     # Query regeneration
@@ -269,8 +273,10 @@ def main() -> int:
                "<b>Reject</b> - anything that doesn't fit that safe shape has nowhere to go. A delete, a shell call, "
                "a second statement hidden after a semicolon: none of them are in the grammar, so the request stops "
                "here, before any database sees it.",
-               "<b>Compile</b> - write a new query from the structure, adding the row cap and date bound, and "
-               "honouring the access the caller is already entitled to. kdb+ runs Guard's text, never the model's.",
+               "<b>Compile</b> - write a new query from the structure, adding the row cap and the table's "
+               "mandatory scan bound (a date filter for partitioned HDB tables, a recent time-window for real-time "
+               "RDB ones), and honouring the access the caller is already entitled to. kdb+ runs Guard's text, "
+               "never the model's.",
            ]),
            P("So the dangerous cases never reach kdb+ - they fail at parse, or at compile:"),
            code(['delete from prices_exchange',
@@ -291,7 +297,8 @@ def main() -> int:
 
     # Customise
     st += [PageBreak(), P("What You Can Customise", "H"),
-           P("Guard is driven by policy, so the same engine adapts to very different agents. You decide:"),
+           P("Guard is policy-driven, so one engine is meant to adapt to very different agents. The policy lets "
+             "you decide:"),
            bullets([
                "<b>Tools</b> - which tools exist at all, which roles can call them, and which need a human to approve.",
                "<b>Data</b> - which tables, columns and rows are reachable, row caps, and the mandatory scan bound "
@@ -302,15 +309,16 @@ def main() -> int:
                "descriptor declares it.",
                "<b>Files</b> - which paths can be read or written, and which are off-limits.",
                "<b>Operations</b> - where a human must approve, spending ceilings, and the kill switch.",
-               "<b>Rollout</b> - start in monitor (shadow) mode: Guard runs the full policy and records the verdict "
-               "it <i>would</i> have reached on real traffic, without yet blocking, so you can measure false refusals "
-               "before flipping to enforce. Legitimate queries that were blocked show up in the audit log, and a "
-               "widen-from-log tool turns them into proposed policy additions for a human to sign off.",
+               "<b>Rollout</b> - start small and widen. Begin with a deliberately narrow allow-list (default deny), "
+               "run it in monitor (shadow) mode where Guard records the verdict it <i>would</i> have reached on real "
+               "traffic without yet blocking, so you can measure false refusals before flipping to enforce. "
+               "Legitimate queries that were blocked show up in the audit log, and a widen-from-log tool turns them "
+               "into proposed policy additions for a human to sign off.",
                "<b>Audit</b> - how every decision is recorded, including hash-chained and off-host options.",
            ]),
-           P("So one engine covers a read-only reporting bot, a coding assistant locked to project files, an ops "
-             "agent that needs sign-off for anything destructive, and an analyst limited to certain rows and date "
-             "ranges - each just a different policy.")]
+           P("The intent is that one engine covers a read-only reporting bot, a coding assistant locked to project "
+             "files, an ops agent that needs sign-off for anything destructive, and an analyst limited to certain "
+             "rows and date ranges - each just a different policy.")]
 
     # Why it holds
     st += [P("Why It Holds", "H"),
@@ -318,14 +326,14 @@ def main() -> int:
                "<b>Default deny:</b> if it isn't explicitly allowed, it doesn't happen.",
                "<b>Outside the model's reach:</b> the policy decision runs in code the model never executes - it "
                "only emits a proposal that Guard adjudicates.",
-               "<b>No handle of its own:</b> the model holds no database connection, shell or socket; the server "
+               "<b>No handle of its own:</b> the model is given no database connection, shell or socket; the server "
                "routes every action through Guard, so a careless or hijacked query is rewritten or refused before "
                "anything runs.",
                "<b>Signed policy:</b> the gate verifies the policy's signature against a pinned key before loading; "
                "a modified policy fails closed, so the agent cannot widen its own permissions.",
                "<b>Audit:</b> every decision is appended to a hash-chained log, so tampering is evident.",
-               "<b>Watchdog:</b> a run of blocked attempts trips a circuit breaker that halts the agent until an "
-               "operator resets it.",
+               "<b>Watchdog:</b> repeated identical or escalating refusals - not ordinary revise-and-retry - trip "
+               "a circuit breaker that halts the agent until an operator resets it.",
                "<b>Deployment boundary:</b> read-only mounts, resource limits and allow-listed egress are the "
                "operator's platform layer - Guard validates the deployment declares them, the platform enforces them.",
            ])]
