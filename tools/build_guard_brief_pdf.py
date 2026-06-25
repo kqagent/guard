@@ -21,7 +21,7 @@ from reportlab.platypus import (Flowable, ListFlowable, ListItem, PageBreak,
                                 Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle)
 
 OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else \
-    Path.home() / "Downloads" / "ai_security_blog_2026_guard_rebuilt.pdf"
+    Path(__file__).resolve().parent.parent / "docs" / "TorQ-Ops-x-Guard-brief.pdf"
 
 INK = colors.HexColor("#1a1a2e")
 ACCENT = colors.HexColor("#0f4c81")
@@ -87,7 +87,7 @@ class CoreArch(Flowable):
         W = self.width; H = self.height
         _box(c, 2, 4, W - 4, H - 8, [], bg=colors.HexColor("#fdf0f0"), ed=LOAD, edw=1.2, dashed=True)
         c.setFont("Helvetica-Bold", 7); c.setFillColor(LOAD)
-        c.drawString(8, H - 16, "The agent can't reach the systems directly - every route runs through Guard")
+        c.drawString(8, H - 16, "The model only proposes - it holds no handle of its own; the server routes every action through Guard")
         cx = W / 2
         # AI agent
         _box(c, cx - 90, H - 58, 180, 28, ["AI AGENT", "proposes an action"], fs=8.5, bg=colors.white)
@@ -216,12 +216,15 @@ def main() -> int:
            P("What each part is:"),
            bullets([
                "<b>AI agent</b> - proposes an action; it has no authority to run anything itself.",
-               "<b>Guard</b> - a separate, signed checkpoint that returns allow, approval or block.",
+               "<b>Guard</b> - a signed-policy checkpoint that returns allow, approval or block; its decision runs "
+               "in code the model never executes.",
                "<b>The three routes</b> - DB queries are rewritten into a bounded, allow-listed query; tool calls "
                "are permission-checked (risky ones need approval); network traffic can only reach allow-listed "
                "destinations.",
-               "<b>Audit + watchdog</b> - every decision is logged, and a misbehaving agent is stopped.",
-               "<b>The boundary</b> - the agent can't reach the systems directly; every route runs through Guard.",
+               "<b>Audit + watchdog</b> - every decision is logged, and a run of blocked attempts trips a breaker "
+               "that halts the agent.",
+               "<b>The boundary</b> - the model holds no database handle, shell or socket of its own; it only emits "
+               "proposals, and the server runs every one through Guard first.",
            ])]
 
     # Query regeneration
@@ -283,11 +286,12 @@ def main() -> int:
            bullets([
                "<b>Tools</b> - which tools exist at all, which roles can call them, and which need a human to approve.",
                "<b>Data</b> - which tables, columns and rows are reachable, row caps, and mandatory date filters.",
-               "<b>Network</b> - which destinations are allowed, and which are blocked.",
-               "<b>Process</b> - no shell, no direct route out, read-only mounts, and memory limits.",
+               "<b>Network &amp; process</b> - the platform boundary (allow-listed egress, read-only mounts, resource "
+               "limits, no ambient shell or credentials) is the operator's to apply; Guard validates the deployment "
+               "descriptor declares it.",
                "<b>Files</b> - which paths can be read or written, and which are off-limits.",
                "<b>Operations</b> - where a human must approve, spending ceilings, and the kill switch.",
-               "<b>Audit</b> - how every decision is recorded, including tamper-evident and off-host options.",
+               "<b>Audit</b> - how every decision is recorded, including hash-chained and off-host options.",
            ]),
            P("So one engine covers a read-only reporting bot, a coding assistant locked to project files, an ops "
              "agent that needs sign-off for anything destructive, and an analyst limited to certain rows and date "
@@ -297,12 +301,18 @@ def main() -> int:
     st += [P("Why It Holds", "H"),
            bullets([
                "<b>Default deny:</b> if it isn't explicitly allowed, it doesn't happen.",
-               "<b>Separate process:</b> the decision is made outside the model, where the agent can't reach it.",
-               "<b>Signed policy:</b> the agent cannot rewrite its own permissions.",
-               "<b>Read-only deployment:</b> the rules are mounted outside the agent's control.",
-               "<b>Audit:</b> every decision is recorded, with tamper-evident options for regulated work.",
-               "<b>Watchdog:</b> repeated bad behaviour trips a breaker and stops the agent.",
-               "<b>Confinement:</b> the agent is boxed in, so there's no way around Guard.",
+               "<b>Outside the model's reach:</b> the policy decision runs in code the model never executes - it "
+               "only emits a proposal that Guard adjudicates.",
+               "<b>No handle of its own:</b> the model holds no database connection, shell or socket; the server "
+               "routes every action through Guard, so a careless or hijacked query is rewritten or refused before "
+               "anything runs.",
+               "<b>Signed policy:</b> the gate verifies the policy's signature against a pinned key before loading; "
+               "a modified policy fails closed, so the agent cannot widen its own permissions.",
+               "<b>Audit:</b> every decision is appended to a hash-chained log, so tampering is evident.",
+               "<b>Watchdog:</b> a run of blocked attempts trips a circuit breaker that halts the agent until an "
+               "operator resets it.",
+               "<b>Deployment boundary:</b> read-only mounts, resource limits and allow-listed egress are the "
+               "operator's platform layer - Guard validates the deployment declares them, the platform enforces them.",
            ])]
 
     # Conclusion
