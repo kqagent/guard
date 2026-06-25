@@ -218,9 +218,10 @@ def main() -> int:
                "<b>AI agent</b> - proposes an action; it has no authority to run anything itself.",
                "<b>Guard</b> - a signed-policy checkpoint that returns allow, approval or block; its decision runs "
                "in code the model never executes.",
-               "<b>The three routes</b> - DB queries are rewritten into a bounded, allow-listed query; tool calls "
-               "are permission-checked (risky ones need approval); network traffic can only reach allow-listed "
-               "destinations.",
+               "<b>The three routes</b> - DB queries are rewritten into a bounded, allow-listed query (in the gate); "
+               "tool calls are permission-checked, with risky ones held for approval (in the gate); and network "
+               "egress is confined to allow-listed destinations by Guard's egress proxy where the operator deploys "
+               "it - the platform layer covered under Deployment boundary below.",
                "<b>Audit + watchdog</b> - every decision is logged, and a run of blocked attempts trips a breaker "
                "that halts the agent.",
                "<b>The boundary</b> - the model holds no database handle, shell or socket of its own; it only emits "
@@ -245,14 +246,18 @@ def main() -> int:
                  '               {"fn": "sum", "col": "bid", "of": "null", "as": "nb"} ],',
                  '  "filters": [ {"col": "sym", "op": "=", "value": "NVDA"} ] }']),
            P("The raw text is gone - the backticks, the operators, anything executable. Then Guard <b>recompiles</b> "
-             "that request into a brand-new query, stamping on the mandatory date filter and row cap the agent never "
-             "wrote. This - and only this - is what kdb+ runs:"),
+             "that request into a brand-new query, stamping on a mandatory scan bound and row cap the agent never "
+             "wrote. Guard knows <b>prices_exchange</b> is a real-time (RDB) table with no date partition, so it bounds "
+             "the scan with a recent time-window rather than a date filter - and would reject a date filter against "
+             "this table outright. This - and only this - is what kdb+ runs:"),
            code(["1000000 sublist (",
                  "  select avg bid, nb:sum null bid by sym",
                  "  from prices_exchange",
-                 "  where date=2026.06.23, sym=`NVDA )"]),
-           P("The engineer still gets the number they were after - but the query is now pinned to a single date and "
-             "capped, so it cannot scan the whole estate or stall the process behind the live desk.", "Body"),
+                 "  where time > .z.p - 30D00:00:00, sym=`NVDA )"]),
+           P("The engineer still gets the number they were after - but the query is now bounded to a recent window and "
+             "capped, so it cannot scan the whole estate or stall the process behind the live desk. (For a partitioned "
+             "HDB table the same step stamps a date filter instead - Guard bounds each table the way its storage "
+             "demands.)", "Body"),
            P("The whole path is two calls - lift, then compile:"),
            code(["def safe_query(tool_input, principal):",
                  "    request = lift(tool_input[\"query\"])           # parse -> structured request, or reject",
@@ -269,13 +274,17 @@ def main() -> int:
            ]),
            P("So the dangerous cases never reach kdb+ - they fail at parse, or at compile:"),
            code(['delete from prices_exchange',
-                 '   -> rejected at parse: only select / exec / meta can be expressed',
+                 '   -> rejected at parse: only select / meta can be expressed',
                  '',
                  'select sym from trade where date=...; system "..."',
                  '   -> rejected at parse: a second statement has no place in the structure',
                  '',
-                 'select pnl from prices_exchange where date=...',
-                 "   -> rejected at compile: column 'pnl' is not on the allow-list"]),
+                 'select pnl from trade where date=2026.06.23',
+                 "   -> rejected at compile: column 'pnl' is not on the allow-list",
+                 '',
+                 'select bid from prices_exchange where date=2026.06.23',
+                 "   -> rejected at compile: prices_exchange is real-time; a date filter",
+                 "      is not valid against it"]),
            P("The property that makes this strong: because Guard <b>emits</b> the query rather than approving the "
              "model's, a hijacked or simply mistaken model cannot get a dangerous query through - the dangerous "
              "form was never something Guard knows how to write.", "Body")]
@@ -285,12 +294,18 @@ def main() -> int:
            P("Guard is driven by policy, so the same engine adapts to very different agents. You decide:"),
            bullets([
                "<b>Tools</b> - which tools exist at all, which roles can call them, and which need a human to approve.",
-               "<b>Data</b> - which tables, columns and rows are reachable, row caps, and mandatory date filters.",
+               "<b>Data</b> - which tables, columns and rows are reachable, row caps, and the mandatory scan bound "
+               "for each table: a date filter on partitioned (HDB) tables, a recent time-window on real-time (RDB) "
+               "ones, set by the table's storage kind.",
                "<b>Network &amp; process</b> - the platform boundary (allow-listed egress, read-only mounts, resource "
                "limits, no ambient shell or credentials) is the operator's to apply; Guard validates the deployment "
                "descriptor declares it.",
                "<b>Files</b> - which paths can be read or written, and which are off-limits.",
                "<b>Operations</b> - where a human must approve, spending ceilings, and the kill switch.",
+               "<b>Rollout</b> - start in monitor (shadow) mode: Guard runs the full policy and records the verdict "
+               "it <i>would</i> have reached on real traffic, without yet blocking, so you can measure false refusals "
+               "before flipping to enforce. Legitimate queries that were blocked show up in the audit log, and a "
+               "widen-from-log tool turns them into proposed policy additions for a human to sign off.",
                "<b>Audit</b> - how every decision is recorded, including hash-chained and off-host options.",
            ]),
            P("So one engine covers a read-only reporting bot, a coding assistant locked to project files, an ops "
@@ -315,6 +330,31 @@ def main() -> int:
                "operator's platform layer - Guard validates the deployment declares them, the platform enforces them.",
            ])]
 
+    # What Guard doesn't do
+    st += [P("What Guard Doesn't Do", "H"),
+           P("Every deterministic gate makes a trade, and you should know its shape before you reach for one. Here "
+             "is honestly where Guard's guarantee stops.", "Lede"),
+           bullets([
+               "<b>We trade a little reach for the guarantee.</b> The agent can only run what the allow-list permits. "
+               "A legitimate query that falls outside the safe q subset - a custom function, an off-allow-list column, "
+               "a shape the grammar doesn't model - is refused, not run. What you get back is a guarantee rather than "
+               "a confident guess, but it is a real ceiling, and widening the grammar to cover more genuine diagnostic "
+               "work is ongoing engineering, not a one-off.",
+               "<b>Guard governs the query and the actions, not the whole world.</b> It makes the q the model writes "
+               "safe and holds risky actions for approval. It is not, by itself, a defence against data leaving "
+               "through some other channel the agent can reach, or against a compromised tool elsewhere in the loop. "
+               "Guard is the kdb+-facing layer of a larger job, not the whole building.",
+               "<b>Some of the boundary is the platform's, not the gate's.</b> Read-only mounts, CPU and memory "
+               "limits, and network-egress allow-listing are enforced by the deployment - the container, the cluster, "
+               "the egress proxy. Guard validates that the deployment declares them and ships the proxy, but it does "
+               "not itself apply an OS-level limit. We are deliberate about which controls are gate code and which "
+               "are the operator's platform layer, and we don't blur the two.",
+               "<b>Approvals are only as good as the human reading them.</b> A gate that asks too often gets "
+               "rubber-stamped. Guard leans on determinism precisely so it doesn't have to ask - it refuses outright, "
+               "the same way every time - but the steps that do route to a person are only as strong as that person's "
+               "attention.",
+           ])]
+
     # Conclusion
     st += [P("Conclusion", "H"),
            P("Production AI does not fail safely by default. Once an agent has credentials, tools and network "
@@ -323,7 +363,11 @@ def main() -> int:
              "rebuild risky outputs into safe forms, require approval for sensitive steps, and record every "
              "decision. The model can stay flexible; the environment around it must be deterministic."),
            P("The practical shift: don't rely on the AI to know its limits. Build systems where the limits are "
-             "enforced before anything runs.")]
+             "enforced before anything runs."),
+           P("So would we hand an AI agent real, hands-on access to a live kdb+ stack? Unguarded, no. Behind Guard - "
+             "where the model only proposes, a deterministic gate disposes, and the only q that reaches kdb+ is one "
+             "Guard wrote and bounded itself - that is a much shorter conversation with the risk team, and the one "
+             "we are comfortable having.")]
 
     doc.build(st)
     print(f"wrote {OUT}  ({OUT.stat().st_size} bytes)")
