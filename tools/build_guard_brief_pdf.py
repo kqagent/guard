@@ -171,13 +171,13 @@ def main() -> int:
            P("How an AI agent gets real, hands-on access to a kdb+ operational stack, and how a deterministic gate "
              "bounds what it runs against the database.", "Sub"),
            P("A support engineer gets a page: some tickers in the consolidated book are showing null prices. There "
-             "is no button for &ldquo;find the broken feed&rdquo; - the work is to poke around live state, compare "
-             "sources, and follow the trail to the cause. This is the kind of first-line investigation we want to "
-             "hand to an AI agent, which means giving it real, hands-on access to the kdb+ estate."),
+             "is no button for &ldquo;find the broken feed&rdquo; - the work is to inspect live state, compare "
+             "sources, and trace the cause. This is the kind of first-line investigation we want to hand to an AI "
+             "agent, which means giving it real, hands-on access to the kdb+ estate."),
            P("A fixed menu of tools cannot anticipate every support question, so a useful agent has to be able to "
-             "try its own query. But an agent free enough to investigate is also free enough to do damage: on kdb+, "
-             "one careless query can take the whole process down, and a wrong or manipulated action can reach "
-             "production. Telling it to &ldquo;be careful&rdquo; is not a control."),
+             "try its own query. But an agent with enough access to investigate also has enough access to do damage: "
+             "on kdb+, one careless query can take the whole process down, and a wrong or manipulated action can "
+             "reach production. Telling it to &ldquo;be careful&rdquo; is not a control."),
            P("This brief is for teams whose support already has some hands-on access to live processes - given a "
              "handle, told to be careful, left to learn as they go. (If your agents have no real access yet, you do "
              "not have this problem.) It is how we keep that access safe: the model can propose, but Guard decides. "
@@ -189,9 +189,9 @@ def main() -> int:
            P("Guard is a deterministic checkpoint between an AI agent and the systems it can touch.", "Lede"),
            P("It works in three plain steps: the agent <b>proposes</b> an action; Guard <b>checks</b> it against a "
              "fixed policy and answers allow, ask-a-human, or block; and only an <b>approved</b> action is actually "
-             "run. The agent never reaches the system directly. A block is not a dead end: Guard hands back the "
-             "reason - which rule tripped, and what would be allowed instead - so the agent can revise its proposal "
-             "and try again within the rules."),
+             "run. The agent never reaches the system directly. On a block, Guard hands back the reason - which "
+             "rule tripped, and what would be allowed instead - so the agent can revise and re-propose within the "
+             "rules."),
            Spacer(1, 1 * mm),
            code(["decision = guard.check(tool_name, tool_args, principal=user_id)",
                  "if decision.effect == \"block\":",
@@ -209,8 +209,8 @@ def main() -> int:
                  "    audit.record(action, verdict)",
                  "    supervisor.observe(action, verdict)",
                  "    return verdict"]),
-           P("A prompt cannot negotiate with Guard. The same action, plus the same policy, always gives the same "
-             "result.", "Cap")]
+           P("Prompt wording does not change Guard's decision. The same action, plus the same policy, always gives "
+             "the same result.", "Cap")]
 
     # Core architecture
     st += [PageBreak(), P("Core Architecture", "H"),
@@ -234,9 +234,9 @@ def main() -> int:
 
     # Query regeneration
     st += [PageBreak(), P("Query Regeneration", "H"),
-           P("This is the core of Guard, and the part worth slowing down on. For database access Guard "
-             "<b>does not run the model's query.</b> It reads what the query is asking for, throws the original "
-             "text away, and writes a fresh, bounded query of its own.", "Body"),
+           P("This is the core of Guard. For database access Guard <b>does not run the model's query.</b> It reads "
+             "what the query is asking for, discards the original text, and writes a new, bounded query of its "
+             "own.", "Body"),
            Pipeline(),
            P("The database receives Guard's query, never the model's original text.", "Cap"),
            P("<b>A worked example.</b> Back to that null-price page. Triaging the feed, the agent wants the average "
@@ -249,11 +249,11 @@ def main() -> int:
                  '  "aggs":    [ {"fn": "avg", "col": "bid"},',
                  '               {"fn": "sum", "col": "bid", "of": "null", "as": "nb"} ],',
                  '  "filters": [ {"col": "sym", "op": "=", "value": "NVDA"} ] }']),
-           P("The raw text is gone - the backticks, the operators, anything executable. Then Guard <b>recompiles</b> "
-             "that request into a brand-new query, stamping on a mandatory scan bound and row cap the agent never "
-             "wrote. Guard knows <b>prices_exchange</b> is a real-time (RDB) table with no date partition, so it bounds "
-             "the scan with a recent time-window rather than a date filter - and would reject a date filter against "
-             "this table outright. This - and only this - is what kdb+ runs:"),
+           P("The raw text is discarded - the backticks, the operators, anything executable. Then Guard "
+             "<b>recompiles</b> that request into a new query, adding a mandatory scan bound and row cap the agent "
+             "never wrote. Guard knows <b>prices_exchange</b> is a real-time (RDB) table with no date partition, so "
+             "it bounds the scan with a recent time-window rather than a date filter, and rejects a date filter "
+             "against this table. This is what kdb+ runs:"),
            code(["1000000 sublist (",
                  "  select avg bid, nb:sum null bid by sym",
                  "  from prices_exchange",
@@ -269,9 +269,9 @@ def main() -> int:
            bullets([
                "<b>Parse</b> - pull out only the parts a query is allowed to have: table, columns, filters, time "
                "window. (The lift step above.)",
-               "<b>Reject</b> - anything that doesn't fit that safe shape has nowhere to go. A delete, a shell call, "
-               "a second statement hidden after a semicolon: none of them are in the grammar, so the request stops "
-               "here, before any database sees it.",
+               "<b>Reject</b> - anything that doesn't fit that safe shape is refused. A delete, a shell call, "
+               "a second statement hidden after a semicolon: none of them are in the grammar, so the request is "
+               "rejected before it reaches any database.",
                "<b>Compile</b> - write a new query from the structure, adding the row cap and the table's "
                "mandatory scan bound (a date filter for partitioned HDB tables, a recent time-window for real-time "
                "RDB ones), and honouring the access the caller is already entitled to. kdb+ runs Guard's text, "
@@ -290,9 +290,9 @@ def main() -> int:
                  'select bid from prices_exchange where date=2026.06.23',
                  "   -> rejected at compile: prices_exchange is real-time; a date filter",
                  "      is not valid against it"]),
-           P("The property that makes this strong: because Guard <b>emits</b> the query rather than approving the "
-             "model's, a hijacked or simply mistaken model cannot push a dangerous query through this path - the "
-             "dangerous form was never something Guard knows how to write.", "Body")]
+           P("Because Guard <b>emits</b> the query rather than approving the model's, a hijacked or simply mistaken "
+             "model cannot push a dangerous query through this path - Guard's grammar cannot express the dangerous "
+             "form, so it cannot generate it.", "Body")]
 
     # Customise
     st += [PageBreak(), P("What You Can Customise", "H"),
@@ -323,8 +323,8 @@ def main() -> int:
     st += [P("Why It Holds", "H"),
            bullets([
                "<b>Default deny:</b> if it isn't explicitly allowed, it doesn't happen.",
-               "<b>Outside the model's reach:</b> the policy decision runs in code the model never executes - it "
-               "only emits a proposal that Guard adjudicates.",
+               "<b>Decision runs outside the model:</b> the policy decision runs in code the model never executes - "
+               "the model only emits a proposal, and Guard decides.",
                "<b>No handle of its own:</b> the model is given no database connection, shell or socket; the server "
                "routes every action through Guard, so a careless or hijacked query is rewritten or refused before "
                "anything runs.",
@@ -339,18 +339,18 @@ def main() -> int:
 
     # What Guard doesn't do
     st += [P("What Guard Doesn't Do", "H"),
-           P("Every deterministic gate makes a trade, and you should know its shape before you reach for one. Here "
-             "is honestly where Guard stops.", "Lede"),
+           P("Every deterministic gate makes a trade, and you should understand the trade before adopting it. Here "
+             "is where Guard stops.", "Lede"),
            bullets([
                "<b>We trade a little reach for determinism.</b> The agent can only run what the allow-list permits. "
                "A legitimate query that falls outside the safe q subset - a custom function, an off-allow-list column, "
                "a shape the grammar doesn't model - is refused, not run. What you get back is a fixed, predictable "
                "boundary rather than a model's confident guess, but it is a real ceiling, and widening the grammar to "
                "cover more genuine diagnostic work is ongoing engineering, not a one-off.",
-               "<b>Guard governs the query and the actions, not the whole world.</b> It makes the q the model writes "
+               "<b>Guard governs the queries and actions, not everything else.</b> It makes the q the model writes "
                "safe and holds risky actions for approval. It is not, by itself, a defence against data leaving "
                "through some other channel the agent can reach, or against a compromised tool elsewhere in the loop. "
-               "Guard is the kdb+-facing layer of a larger job, not the whole building.",
+               "Guard is the kdb+-facing layer; other channels and tools are outside its scope.",
                "<b>Some of the boundary is the platform's, not the gate's.</b> Read-only mounts, CPU and memory "
                "limits, and network-egress allow-listing are enforced by the deployment - the container, the cluster, "
                "the egress proxy. Guard validates that the deployment declares them and ships the proxy, but it does "
@@ -372,9 +372,8 @@ def main() -> int:
            P("The practical shift: don't rely on the AI to know its limits. Build systems where the limits are "
              "enforced before anything runs."),
            P("So would we hand an AI agent real, hands-on access to a live kdb+ stack? Unguarded, no. Behind Guard - "
-             "where the model only proposes and a deterministic gate disposes, rewriting each query into one Guard "
-             "wrote and bounded itself - that is a much shorter conversation with the risk team, and the one we are "
-             "comfortable having.")]
+             "where the model proposes, the gate decides, and each query that runs against kdb+ is one Guard rewrote "
+             "and bounded - it is a position we can take to the risk team.")]
 
     doc.build(st)
     print(f"wrote {OUT}  ({OUT.stat().st_size} bytes)")
