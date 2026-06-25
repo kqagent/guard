@@ -168,8 +168,8 @@ def main() -> int:
 
     # Cover
     st += [P("TorQ Ops x Guard: When the Support Agent Gets the Keys", "Cover"),
-           P("How an AI agent gets real, hands-on access to a kdb+ operational stack - and still can't take it "
-             "down.", "Sub"),
+           P("How an AI agent gets real, hands-on access to a kdb+ operational stack, and how a deterministic gate "
+             "bounds what it runs against the database.", "Sub"),
            P("A support engineer gets a page: some tickers in the consolidated book are showing null prices. There "
              "is no button for &ldquo;find the broken feed&rdquo; - the work is to poke around live state, compare "
              "sources, and follow the trail to the cause. This is the kind of first-line investigation we want to "
@@ -259,9 +259,8 @@ def main() -> int:
                  "  from prices_exchange",
                  "  where time > .z.p - 30D00:00:00, sym=`NVDA )"]),
            P("The engineer still gets the number they were after - but the query is now bounded to a recent window and "
-             "capped, so it cannot scan the whole estate or stall the process behind the live desk. (For a partitioned "
-             "HDB table the same step stamps a date filter instead - Guard bounds each table the way its storage "
-             "demands.)", "Body"),
+             "capped, instead of an unbounded scan across the whole estate. (For a partitioned HDB table the same "
+             "step stamps a date filter instead - Guard bounds each table the way its storage demands.)", "Body"),
            P("The whole path is two calls - lift, then compile:"),
            code(["def safe_query(tool_input, principal):",
                  "    request = lift(tool_input[\"query\"])           # parse -> structured request, or reject",
@@ -292,8 +291,8 @@ def main() -> int:
                  "   -> rejected at compile: prices_exchange is real-time; a date filter",
                  "      is not valid against it"]),
            P("The property that makes this strong: because Guard <b>emits</b> the query rather than approving the "
-             "model's, a hijacked or simply mistaken model cannot get a dangerous query through - the dangerous "
-             "form was never something Guard knows how to write.", "Body")]
+             "model's, a hijacked or simply mistaken model cannot push a dangerous query through this path - the "
+             "dangerous form was never something Guard knows how to write.", "Body")]
 
     # Customise
     st += [PageBreak(), P("What You Can Customise", "H"),
@@ -341,13 +340,13 @@ def main() -> int:
     # What Guard doesn't do
     st += [P("What Guard Doesn't Do", "H"),
            P("Every deterministic gate makes a trade, and you should know its shape before you reach for one. Here "
-             "is honestly where Guard's guarantee stops.", "Lede"),
+             "is honestly where Guard stops.", "Lede"),
            bullets([
-               "<b>We trade a little reach for the guarantee.</b> The agent can only run what the allow-list permits. "
+               "<b>We trade a little reach for determinism.</b> The agent can only run what the allow-list permits. "
                "A legitimate query that falls outside the safe q subset - a custom function, an off-allow-list column, "
-               "a shape the grammar doesn't model - is refused, not run. What you get back is a guarantee rather than "
-               "a confident guess, but it is a real ceiling, and widening the grammar to cover more genuine diagnostic "
-               "work is ongoing engineering, not a one-off.",
+               "a shape the grammar doesn't model - is refused, not run. What you get back is a fixed, predictable "
+               "boundary rather than a model's confident guess, but it is a real ceiling, and widening the grammar to "
+               "cover more genuine diagnostic work is ongoing engineering, not a one-off.",
                "<b>Guard governs the query and the actions, not the whole world.</b> It makes the q the model writes "
                "safe and holds risky actions for approval. It is not, by itself, a defence against data leaving "
                "through some other channel the agent can reach, or against a compromised tool elsewhere in the loop. "
@@ -373,9 +372,9 @@ def main() -> int:
            P("The practical shift: don't rely on the AI to know its limits. Build systems where the limits are "
              "enforced before anything runs."),
            P("So would we hand an AI agent real, hands-on access to a live kdb+ stack? Unguarded, no. Behind Guard - "
-             "where the model only proposes, a deterministic gate disposes, and the only q that reaches kdb+ is one "
-             "Guard wrote and bounded itself - that is a much shorter conversation with the risk team, and the one "
-             "we are comfortable having.")]
+             "where the model only proposes and a deterministic gate disposes, rewriting each query into one Guard "
+             "wrote and bounded itself - that is a much shorter conversation with the risk team, and the one we are "
+             "comfortable having.")]
 
     doc.build(st)
     print(f"wrote {OUT}  ({OUT.stat().st_size} bytes)")
